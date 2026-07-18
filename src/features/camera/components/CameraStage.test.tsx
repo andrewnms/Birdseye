@@ -1,5 +1,5 @@
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
-import { PermissionStatus, type PermissionResponse } from "expo";
+import { PermissionStatus, type PermissionResponse } from "expo-modules-core";
 import {
   useCameraPermissions,
   useMicrophonePermissions,

@@ -272,11 +272,7 @@ function GuidedLessonRun({
 
   return (
     <CameraStage ref={cameraRef}>
-      <SpatialOverlay
-        anchorMode={hasVisionOverlay ? "screen" : "world"}
-        primitives={displayedOverlay}
-        wireframe={wireframe}
-      />
+      <SpatialOverlay anchorMode="world" primitives={displayedOverlay} wireframe={wireframe} />
       <View pointerEvents="box-none" style={styles.chrome}>
         <View style={styles.topBar}>
           <View style={styles.goalPill}>
@@ -337,7 +333,7 @@ export function GuidedLesson(props: GuidedLessonProps) {
 
 const styles = StyleSheet.create({
   chrome: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
     justifyContent: "space-between",
     padding: 20,
     paddingBottom: 28,
@@ -428,7 +424,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   completionScreen: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     backgroundColor: "rgba(8, 15, 24, 0.72)",
     gap: 14,

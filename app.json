@@ -41,7 +41,8 @@
           "cameraPermission": "Birdseye uses the camera to overlay step-by-step guidance on the real world.",
           "microphonePermission": "Birdseye uses the microphone for hands-free voice guidance."
         }
-      ]
+      ],
+      "expo-audio"
     ]
   }
 }

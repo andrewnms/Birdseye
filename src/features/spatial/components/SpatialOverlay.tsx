@@ -250,6 +250,17 @@ function buildOverlayGeometry(state: OverlaySceneState, inputs: SceneInputs): vo
     inputs.alignmentSquare ?? createCenteredAlignmentSquare(state.viewport);
   state.alignmentSquare = square;
   applyAnchorMode(state, inputs.anchorMode);
+
+  if (inputs.anchorMode === "world") {
+    // Latch new geometry to the camera pose it was authored against, so an
+    // annotation appears where the learner is looking and then stays there.
+    // ponytail: capture-time pose bookkeeping can replace this build-time
+    // latch if vision latency makes the drift visible.
+    state.overlayGroup.quaternion.copy(state.camera.quaternion);
+  } else {
+    state.overlayGroup.quaternion.identity();
+  }
+  state.overlayGroup.updateMatrixWorld(true);
   const distance = normalizedAnchorDistance(inputs.anchorDistance);
   const toWorld = (point: readonly [number, number]) =>
     normalizedPointToWorldPoint(
@@ -313,7 +324,11 @@ function projectLabels(state: OverlaySceneState): ProjectedLabel[] {
       point: label.point,
       square: state.alignmentSquare,
       projectWorldPoint: () =>
-        worldPointToScreenPoint(label.position, state.camera, state.viewport),
+        worldPointToScreenPoint(
+          state.overlayGroup.localToWorld(label.position.clone()),
+          state.camera,
+          state.viewport,
+        ),
     });
 
     return screenPoint
@@ -565,14 +580,14 @@ export function SpatialOverlay({
 
 const styles = StyleSheet.create({
   container: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
   },
   glView: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: "transparent",
   },
   labelLayer: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
   },
   label: {
     position: "absolute",

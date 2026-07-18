@@ -82,6 +82,15 @@ export function createServerApp({
   const clientSecretAttempts = new Map<string, { count: number; expiresAt: number }>();
 
   app.disable("x-powered-by");
+  app.use((request, response, next) => {
+    const startedAt = Date.now();
+    response.on("finish", () => {
+      console.log(
+        `${request.method} ${request.path} ${response.statusCode} ${Date.now() - startedAt}ms`,
+      );
+    });
+    next();
+  });
   app.use(express.json({ limit: "800kb" }));
   app.use(
     cors({
@@ -131,7 +140,11 @@ export function createServerApp({
 
       response.set("Cache-Control", "no-store");
       response.json(observation);
-    } catch {
+    } catch (error) {
+      console.error(
+        "Birdseye vision request failed:",
+        error instanceof Error ? error.message : "unknown server error",
+      );
       response.status(502).json({ error: "Unable to analyze the camera frame right now." });
     }
   });

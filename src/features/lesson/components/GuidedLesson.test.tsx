@@ -122,7 +122,7 @@ describe("GuidedLesson", () => {
     expect(screen.getByLabelText("Overlay world with 1 primitives")).toBeTruthy();
   });
 
-  it("replaces the static guidance with a screen-locked annotation from the current camera frame", async () => {
+  it("replaces the static guidance with a world-anchored annotation from the current camera frame", async () => {
     const analyzeFrame = jest.fn().mockResolvedValue({
       observation: "the paper point is visible at the center.",
       overlay: [{ type: "label", at: [0.5, 0.5], text: "fold this point" }],
@@ -153,7 +153,7 @@ describe("GuidedLesson", () => {
         },
         expect.objectContaining({ baseUrl: "http://192.168.1.20:3000" }),
       );
-      expect(screen.getByLabelText("Overlay screen with 1 primitives")).toBeTruthy();
+      expect(screen.getByLabelText("Overlay world with 1 primitives")).toBeTruthy();
       expect(screen.getByText("the paper point is visible at the center.")).toBeTruthy();
     });
   });
