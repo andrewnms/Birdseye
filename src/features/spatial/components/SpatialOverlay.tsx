@@ -1,5 +1,4 @@
-import { GLView, type ExpoWebGLRenderingContext } from "expo-gl";
-import { Renderer } from "expo-three";
+import { Canvas, type RootState } from "@react-three/fiber/native";
 import { DeviceMotion } from "expo-sensors";
 import {
   useCallback,
@@ -23,6 +22,7 @@ import {
   Scene,
   SphereGeometry,
   Vector3,
+  WebGLRenderer,
 } from "three";
 import {
   LayoutChangeEvent,
@@ -76,14 +76,12 @@ type ProjectedLabel = {
 };
 
 type OverlaySceneState = {
-  gl: ExpoWebGLRenderingContext;
-  renderer: Renderer;
+  renderer: WebGLRenderer;
   scene: Scene;
   camera: PerspectiveCamera;
   overlayGroup: Group;
   labels: WorldLabel[];
   viewport: ViewportSize;
-  animationFrame: number | null;
 };
 
 type DisposableObject = {
@@ -295,33 +293,15 @@ function projectLabels(state: OverlaySceneState): ProjectedLabel[] {
   });
 }
 
-function updateViewport(
-  state: OverlaySceneState,
-  viewport: ViewportSize,
-): void {
+function updateViewport(state: OverlaySceneState, viewport: ViewportSize): void {
   state.viewport = viewport;
   state.camera.aspect = viewport.width / viewport.height;
   state.camera.updateProjectionMatrix();
-  state.renderer.setSize(state.gl.drawingBufferWidth, state.gl.drawingBufferHeight);
-}
-
-function startRenderLoop(state: OverlaySceneState): void {
-  const renderFrame = () => {
-    state.renderer.render(state.scene, state.camera);
-    state.gl.endFrameEXP();
-    state.animationFrame = requestAnimationFrame(renderFrame);
-  };
-
-  renderFrame();
 }
 
 function disposeScene(state: OverlaySceneState): void {
-  if (state.animationFrame !== null) {
-    cancelAnimationFrame(state.animationFrame);
-  }
-
   disposeOverlayGroup(state.overlayGroup);
-  state.renderer.dispose();
+  state.scene.remove(state.overlayGroup);
 }
 
 /**
@@ -384,8 +364,8 @@ export function SpatialOverlay({
     setProjectedLabels(projectLabels(state));
   }, []);
 
-  const handleContextCreate = useCallback(
-    (gl: ExpoWebGLRenderingContext) => {
+  const handleCanvasCreated = useCallback(
+    (canvasState: RootState) => {
       const previousState = rendererStateRef.current;
 
       if (previousState) {
@@ -393,27 +373,24 @@ export function SpatialOverlay({
       }
 
       const viewport = viewportRef.current;
-      const renderer = new Renderer({ gl, alpha: true, antialias: true });
+      const renderer = canvasState.gl;
       renderer.setClearColor(0x000000, 0);
-      const scene = new Scene();
-      const camera = new PerspectiveCamera(
-        cameraFovDegrees,
-        hasUsableViewport(viewport) ? viewport.width / viewport.height : 1,
-        0.01,
-        20,
-      );
+      const scene = canvasState.scene;
+      const camera = canvasState.camera as PerspectiveCamera;
+      camera.fov = cameraFovDegrees;
+      camera.near = 0.01;
+      camera.far = 20;
+      camera.updateProjectionMatrix();
       const overlayGroup = new Group();
       scene.add(overlayGroup);
 
       const state: OverlaySceneState = {
-        gl,
         renderer,
         scene,
         camera,
         overlayGroup,
         labels: [],
         viewport,
-        animationFrame: null,
       };
 
       rendererStateRef.current = state;
@@ -426,7 +403,6 @@ export function SpatialOverlay({
       applyLatestRotation();
       state.camera.updateMatrixWorld(true);
       setProjectedLabels(projectLabels(state));
-      startRenderLoop(state);
     },
     [applyLatestRotation, inputs],
   );
@@ -521,7 +497,13 @@ export function SpatialOverlay({
       style={[styles.container, style]}
       onLayout={handleLayout}
     >
-      <GLView pointerEvents="none" style={styles.glView} onContextCreate={handleContextCreate} />
+      <Canvas
+        pointerEvents="none"
+        style={styles.glView}
+        camera={{ fov: cameraFovDegrees, near: 0.01, far: 20 }}
+        gl={{ alpha: true, antialias: true }}
+        onCreated={handleCanvasCreated}
+      />
       <View pointerEvents="none" style={styles.labelLayer}>
         {projectedLabels.map((label) => (
           <View

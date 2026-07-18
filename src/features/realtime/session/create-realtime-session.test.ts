@@ -24,6 +24,15 @@ function createDataChannel() {
 }
 
 describe("createRealtimeSession", () => {
+  it("fails gracefully when the runtime does not include native WebRTC", async () => {
+    await expect(
+      createRealtimeSession({
+        tokenServerUrl: "http://192.168.1.20:3000",
+        onOverlay: jest.fn(),
+      }),
+    ).rejects.toThrow("live voice requires a birdseye development build");
+  });
+
   it("connects the microphone and configures overlay and voice-step tools with an ephemeral client secret", async () => {
     const channel = createDataChannel();
     const audioTrack = { stop: jest.fn() };

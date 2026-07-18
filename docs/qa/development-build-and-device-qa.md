@@ -7,6 +7,11 @@ it does not use paid eas builds. the `development` profile in `eas.json` is
 reserved for a future internal-distribution build; the working loop below uses
 local compilation with the installed `expo-dev-client`.
 
+sdk 57 runs entirely on React Native's new architecture and cannot disable it.
+`react-native-webrtc` is the required realtime transport and its current native
+directory metadata does not yet mark it as tested there. keep that warning visible
+in `npx expo-doctor` and treat the physical-device realtime check as mandatory.
+
 the stage path is a cached paper-crane lesson because it is deterministic. the
 live planner must use the same lesson contract for practical goals beyond
 origami, including pcb assembly, woodworking preparation, and cooking

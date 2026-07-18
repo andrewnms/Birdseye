@@ -29,7 +29,7 @@ const overlayPrimitiveSchema = {
       additionalProperties: false,
       required: ["type", "from", "to"],
       properties: {
-        type: { const: "arrow" },
+        type: { type: "string", const: "arrow" },
         from: normalizedPointSchema,
         to: normalizedPointSchema,
       },
@@ -39,7 +39,7 @@ const overlayPrimitiveSchema = {
       additionalProperties: false,
       required: ["type", "from", "to"],
       properties: {
-        type: { const: "crease_line" },
+        type: { type: "string", const: "crease_line" },
         from: normalizedPointSchema,
         to: normalizedPointSchema,
       },
@@ -49,7 +49,7 @@ const overlayPrimitiveSchema = {
       additionalProperties: false,
       required: ["type", "from", "to"],
       properties: {
-        type: { const: "fold_curve" },
+        type: { type: "string", const: "fold_curve" },
         from: normalizedPointSchema,
         to: normalizedPointSchema,
       },
@@ -59,7 +59,7 @@ const overlayPrimitiveSchema = {
       additionalProperties: false,
       required: ["type", "at"],
       properties: {
-        type: { const: "dot" },
+        type: { type: "string", const: "dot" },
         at: normalizedPointSchema,
       },
     },
@@ -68,7 +68,7 @@ const overlayPrimitiveSchema = {
       additionalProperties: false,
       required: ["type", "at", "text"],
       properties: {
-        type: { const: "label" },
+        type: { type: "string", const: "label" },
         at: normalizedPointSchema,
         text: { type: "string" },
       },
@@ -143,7 +143,7 @@ const plannerInstructions = `You create concise, safe, real-world learning lesso
 The learner aligns their work surface inside a visible square. You do not claim to track objects or verify physical completion.
 Produce 2 to 8 sequential steps for the stated goal. Each step contains short spoken narration and at least one overlay primitive.
 Use normalized coordinates from 0 to 1 inside the square. arrow, crease_line, and fold_curve require from and to points. dot requires at. label requires at and text.
-Always return model. Use null unless a small rough local wireframe materially helps the learner. A model has local xyz vertices and polygon faces with zero-based indices. Keep language direct, flag safety-critical steps in the narration, and make every instruction physically actionable.`;
+Always return model. Use null unless a small rough local wireframe materially helps the learner. A model has local xyz vertices and polygon faces with zero-based indices. Use the same language as the learner's goal. Keep language direct, flag safety-critical steps in the narration, and make every instruction physically actionable.`;
 
 function outputText(payload: unknown): string | null {
   if (typeof payload !== "object" || payload === null) {
@@ -182,6 +182,22 @@ function outputText(payload: unknown): string | null {
   }
 
   return null;
+}
+
+function upstreamErrorMessage(payload: unknown): string {
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "error" in payload &&
+    typeof payload.error === "object" &&
+    payload.error !== null &&
+    "message" in payload.error &&
+    typeof payload.error.message === "string"
+  ) {
+    return payload.error.message;
+  }
+
+  return "the upstream service returned no usable error message";
 }
 
 export function createPlanner({
@@ -223,7 +239,9 @@ export function createPlanner({
       const payload: unknown = await response.json().catch(() => null);
 
       if (!response.ok) {
-        throw new Error("the planner request failed");
+        throw new Error(
+          `the planner upstream request failed with ${response.status}: ${upstreamErrorMessage(payload)}`,
+        );
       }
 
       const text = outputText(payload);

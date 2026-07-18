@@ -65,17 +65,18 @@ A judge folds a real origami model by following the app's voice guidance and on-
 - Hero demo (origami) uses a pre-generated cached plan (deterministic on stage); off-script goals generate live with a visible "planning…" state.
 
 ### Spatial anchoring
-Gyro-only anchoring (the Pokémon Go trick): `expo-sensors` DeviceMotion quaternion drives the three.js camera; annotations sit at fixed world directions rendered via `expo-gl` + `expo-three`. Rotation sticks, walking drifts — acceptable for a tabletop demo. No ARKit/ARCore/ViroReact.
+Gyro-only anchoring (the Pokémon Go trick): `expo-sensors` DeviceMotion quaternion drives the three.js camera; annotations sit at fixed world directions rendered via `expo-gl` + `@react-three/fiber/native`. Rotation sticks, walking drifts — acceptable for a tabletop demo. No ARKit/ARCore/ViroReact.
 
 ### Stack
 - Expo SDK 57 + TypeScript, custom dev build (`expo-dev-client`) — Expo Go does not support these native modules.
-- `expo-camera` (feed + permissions), `expo-gl`/`expo-three`/`three` (3D annotations), `expo-sensors` (gyro), `react-native-webrtc` + config plugin (Realtime API transport).
+- `expo-camera` (feed + permissions), `expo-gl`/`@react-three/fiber`/`three` (3D annotations), `expo-sensors` (gyro), `react-native-webrtc` (Realtime API transport).
 - Local Express token server on the dev Mac: mints ephemeral Realtime client secrets (`POST /v1/realtime/client_secrets`) and hosts the Planner call. OpenAI API key never ships in the app. Phone reaches it over LAN; hotspot fallback if venue Wi-Fi isolates devices.
 
 ### Known constraints (accepted)
 - Realtime API is audio-first; live video/vision input is immature — hence self-reported step completion.
 - Annotations are placed against a canonical aligned square, not tracked to the physical paper; the user aligns their paper to an on-screen frame.
 - OpenAI Agents SDK does not run in React Native; the WebRTC client is hand-rolled (`registerGlobals()`, audio-mode setup). Reference: thorwebdev/expo-webrtc-openai-realtime.
+- Expo SDK 57 requires React Native's New Architecture. The current React Native Directory metadata marks `react-native-webrtc` as untested there, so a physical-device Realtime check is mandatory before any claim of production readiness.
 
 ## Testing Decisions
 - Good tests should validate user-visible behavior, not internal implementation.

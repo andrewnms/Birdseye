@@ -51,5 +51,31 @@ describe("planner", () => {
     expect(payload?.text.format.schema.properties.steps.items.properties.overlay.items).toEqual(
       expect.objectContaining({ anyOf: expect.any(Array) }),
     );
+    expect(payload?.input[0]).toEqual(
+      expect.objectContaining({
+        role: "developer",
+        content: expect.stringContaining("Use the same language as the learner's goal."),
+      }),
+    );
+  });
+
+  it("keeps upstream detail on the server without ever including the API key", async () => {
+    const planner = createPlanner({
+      apiKey: "server-only-key",
+      model: "gpt-5.6",
+      fetcher: jest.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { message: "invalid response format" } }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    });
+
+    await expect(planner.create("prepare dinner")).rejects.toThrow(
+      "the planner upstream request failed with 400: invalid response format",
+    );
+    await expect(planner.create("prepare dinner")).rejects.not.toThrow(
+      "server-only-key",
+    );
   });
 });

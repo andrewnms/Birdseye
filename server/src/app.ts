@@ -92,7 +92,11 @@ export function createServerApp({ clientSecretMinter, planner }: ServerOptions) 
     try {
       const plan = await planner.create(request.body.goal.trim());
       response.json(plan);
-    } catch {
+    } catch (error) {
+      console.error(
+        "Birdseye planner request failed:",
+        error instanceof Error ? error.message : "unknown server error",
+      );
       response.status(502).json({ error: "Unable to create a lesson right now." });
     }
   });

@@ -1,8 +1,4 @@
-import {
-  mediaDevices,
-  RTCPeerConnection,
-  registerGlobals,
-} from "react-native-webrtc";
+import { NativeModules } from "react-native";
 
 import type { OverlayPrimitive } from "../../lesson/lib/plan";
 import { normalizeRealtimeOverlay } from "../../overlay-tool";
@@ -111,12 +107,35 @@ const advanceLessonStepTool = {
   },
 } as const;
 
-const nativeWebRtc: RealtimeWebRtcAdapter = {
-  registerGlobals,
-  createPeerConnection: () =>
-    new RTCPeerConnection() as unknown as RealtimePeerConnection,
-  getUserMedia: (constraints) => mediaDevices.getUserMedia(constraints),
+type NativeWebRtcExports = {
+  mediaDevices: {
+    getUserMedia(constraints: {
+      audio: true;
+      video: false;
+    }): Promise<RealtimeMicrophoneStream>;
+  };
+  RTCPeerConnection: new () => RealtimePeerConnection;
+  registerGlobals(): void;
 };
+
+/**
+ * Expo Go does not include react-native-webrtc. Avoid evaluating its entry
+ * module until its native WebRTCModule is confirmed, so camera annotations
+ * remain available there with device-speech guidance.
+ */
+function nativeWebRtcAdapter(): RealtimeWebRtcAdapter | null {
+  if (!("WebRTCModule" in NativeModules)) {
+    return null;
+  }
+
+  const native = require("react-native-webrtc") as NativeWebRtcExports;
+
+  return {
+    registerGlobals: native.registerGlobals,
+    createPeerConnection: () => new native.RTCPeerConnection(),
+    getUserMedia: (constraints) => native.mediaDevices.getUserMedia(constraints),
+  };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -203,8 +222,14 @@ export async function createRealtimeSession({
   onEvent,
   fetcher,
   signal,
-  webrtc = nativeWebRtc,
+  webrtc,
 }: CreateRealtimeSessionOptions): Promise<RealtimeSession> {
+  const adapter = webrtc ?? nativeWebRtcAdapter();
+
+  if (!adapter) {
+    throw new Error("live voice requires a birdseye development build");
+  }
+
   let microphone: RealtimeMicrophoneStream | null = null;
   let peer: RealtimePeerConnection | null = null;
   let channel: RealtimeDataChannel | null = null;
@@ -243,9 +268,9 @@ export async function createRealtimeSession({
   };
 
   try {
-    webrtc.registerGlobals();
-    microphone = await webrtc.getUserMedia({ audio: true, video: false });
-    peer = webrtc.createPeerConnection();
+    adapter.registerGlobals();
+    microphone = await adapter.getUserMedia({ audio: true, video: false });
+    peer = adapter.createPeerConnection();
     const [audioTrack] = microphone.getAudioTracks();
 
     if (!audioTrack) {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 
 import type { LessonPlan } from "../lib/plan";
 import { GuidedLesson } from "./GuidedLesson";
@@ -77,5 +77,28 @@ describe("GuidedLesson", () => {
 
     expect(screen.getByLabelText("Lesson complete")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Next step" })).toBeNull();
+  });
+
+  it("keeps the annotated lesson running with device voice when live WebRTC is unavailable", async () => {
+    const narrate = jest.fn();
+    const createSession = jest
+      .fn()
+      .mockRejectedValue(new Error("live voice requires a birdseye development build"));
+
+    await render(
+      <GuidedLesson
+        plan={plan}
+        tokenServerUrl="http://192.168.1.20:3000"
+        narrate={narrate}
+        createSession={createSession}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("device voice")).toBeTruthy();
+      expect(narrate).toHaveBeenCalledWith("Place the bare board in the square.");
+    });
+
+    expect(screen.getByLabelText("Overlay with 1 primitives")).toBeTruthy();
   });
 });
