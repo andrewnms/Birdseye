@@ -3,6 +3,7 @@ import {
   type SpatialOverlayPrimitive,
 } from "../../src/features/spatial/lib/overlay-primitives";
 import { overlayPrimitiveSchema } from "./overlay-schema";
+import { isRecord, outputText } from "./responses-output";
 
 type Fetcher = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -54,10 +55,6 @@ Return one concise observation in the learner's language. Do not claim that a ta
 Return zero to four overlays only when their positions are visible and useful for the current step. Coordinates are normalized from 0 to 1 within the image. Use an empty overlay array when the frame is unclear or an overlay would be speculative.
 Keep the observation practical and flag only clearly visible immediate hazards, such as contact with a hot surface, a sharp edge, exposed electricity, or unstable material.`;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function isBase64ImageDataUrl(value: string): boolean {
   const match = /^data:image\/(?:jpeg|png);base64,([A-Za-z0-9+/]*={0,2})$/.exec(value);
 
@@ -98,38 +95,6 @@ export function parseVisionAnalysisRequest(value: unknown): VisionAnalysisReques
     imageDataUrl: value.imageDataUrl,
     step: { n: stepNumber, say: stepNarration },
   };
-}
-
-function outputText(payload: unknown): string | null {
-  if (!isRecord(payload)) {
-    return null;
-  }
-
-  if (typeof payload.output_text === "string") {
-    return payload.output_text;
-  }
-
-  if (!Array.isArray(payload.output)) {
-    return null;
-  }
-
-  for (const item of payload.output) {
-    if (!isRecord(item) || !Array.isArray(item.content)) {
-      continue;
-    }
-
-    for (const content of item.content) {
-      if (
-        isRecord(content) &&
-        content.type === "output_text" &&
-        typeof content.text === "string"
-      ) {
-        return content.text;
-      }
-    }
-  }
-
-  return null;
 }
 
 export function parseVisionObservation(candidate: unknown): VisionObservation | null {

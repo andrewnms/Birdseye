@@ -1,4 +1,3 @@
-import * as Speech from "expo-speech";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
@@ -18,6 +17,12 @@ import {
   analyzeCameraFrame,
   type CameraFrameAnalysis,
 } from "../../vision/client";
+import { askVoiceQuestion, narrateText } from "../../voice/api-client/voice-api";
+import {
+  PushToTalkButton,
+  type RecordedVoiceClip,
+} from "../../voice/components/PushToTalkButton";
+import { playVoiceReply, stopVoicePlayback } from "../../voice/lib/play-voice-reply";
 import type { LessonPlan } from "../lib/plan";
 import { advanceLesson, startLesson, type LessonSession } from "../lib/session";
 
@@ -38,6 +43,9 @@ export type GuidedLessonProps = {
   analyzeFrame?: CameraFrameAnalyzer;
   /** A conservative default keeps mobile heat and API use bounded. */
   visionPollIntervalMs?: number;
+  /** Injectable for deterministic tests. */
+  askQuestion?: typeof askVoiceQuestion;
+  playReply?: (replyAudioBase64: string) => Promise<void>;
 };
 
 type VoiceMode = "connecting" | "realtime" | "fallback";
@@ -64,11 +72,6 @@ function createStepPrompt(plan: LessonPlan, stepIndex: number): string {
   ].join(" ");
 }
 
-function defaultNarrate(message: string): void {
-  Speech.stop();
-  Speech.speak(message);
-}
-
 /**
  * One executor for cached and live lesson plans. It binds every current step
  * to one narration, one overlay payload, and one completion transition.
@@ -77,10 +80,12 @@ function GuidedLessonRun({
   plan,
   tokenServerUrl,
   onExit,
-  narrate = defaultNarrate,
+  narrate,
   createSession = createRealtimeSession,
   analyzeFrame = analyzeCameraFrame,
   visionPollIntervalMs = 2_500,
+  askQuestion = askVoiceQuestion,
+  playReply = playVoiceReply,
 }: GuidedLessonProps) {
   const [lesson, setLesson] = useState<LessonSession>(() => startLesson(plan));
   const [toolOverlay, setToolOverlay] = useState<SpatialOverlayPrimitive[] | null>(
@@ -92,10 +97,17 @@ function GuidedLessonRun({
   const [connectionRevision, setConnectionRevision] = useState(0);
   const [visionAnalysis, setVisionAnalysis] =
     useState<VisionAnalysisSnapshot | null>(null);
+  const [voiceAnswer, setVoiceAnswer] = useState<string | null>(null);
+  const [voiceBusy, setVoiceBusy] = useState(false);
   const cameraRef = useRef<CameraStageRef | null>(null);
   const realtimeSessionRef = useRef<RealtimeSession | null>(null);
   const pendingTapAdvanceRef = useRef(false);
   const visionRequestInFlightRef = useRef(false);
+  const narrationStepRef = useRef(0);
+
+  useEffect(() => {
+    narrationStepRef.current = lesson.status === "complete" ? -1 : lesson.stepIndex;
+  }, [lesson]);
 
   const advance = useCallback((fromVoice = false) => {
     if (fromVoice && pendingTapAdvanceRef.current) {
@@ -104,6 +116,7 @@ function GuidedLessonRun({
     }
 
     setToolOverlay(null);
+    setVoiceAnswer(null);
     setLesson((current) => advanceLesson(current));
   }, []);
 
@@ -162,13 +175,31 @@ function GuidedLessonRun({
     }
 
     if (voiceMode === "fallback") {
-      narrate(lesson.currentStep.say);
+      if (narrate) {
+        narrate(lesson.currentStep.say);
+        return;
+      }
+
+      if (!tokenServerUrl) {
+        return;
+      }
+
+      const requestedStep = lesson.stepIndex;
+      void narrateText(lesson.currentStep.say, { baseUrl: tokenServerUrl })
+        .then((audioBase64) => {
+          if (narrationStepRef.current === requestedStep) {
+            return playReply(audioBase64);
+          }
+        })
+        .catch(() => {
+          // The written step stays on screen if narration audio is unavailable.
+        });
     }
-  }, [connectionRevision, lesson, narrate, voiceMode]);
+  }, [connectionRevision, lesson, narrate, playReply, tokenServerUrl, voiceMode]);
 
   useEffect(
     () => () => {
-      Speech.stop();
+      stopVoicePlayback();
     },
     [],
   );
@@ -227,6 +258,43 @@ function GuidedLessonRun({
       clearInterval(interval);
     };
   }, [analyzeFrame, lesson, tokenServerUrl, visionPollIntervalMs]);
+
+  const handleVoiceClip = useCallback(
+    async (clip: RecordedVoiceClip) => {
+      if (!tokenServerUrl || lesson.status === "complete") {
+        return;
+      }
+
+      setVoiceBusy(true);
+
+      try {
+        const observation =
+          visionAnalysis?.stepIndex === lesson.stepIndex
+            ? visionAnalysis.analysis.observation
+            : undefined;
+        const answer = await askQuestion(
+          {
+            ...clip,
+            goal: lesson.plan.goal,
+            step: { n: lesson.currentStep.n, say: lesson.currentStep.say },
+            ...(observation ? { observation } : {}),
+          },
+          { baseUrl: tokenServerUrl },
+        );
+        setVoiceAnswer(answer.reply);
+        await playReply(answer.replyAudioBase64).catch(() => {
+          // The written answer still lands if audio playback fails.
+        });
+      } catch (error) {
+        setVoiceAnswer(
+          error instanceof Error ? error.message : "the tutor could not answer. try again.",
+        );
+      } finally {
+        setVoiceBusy(false);
+      }
+    },
+    [askQuestion, lesson, playReply, tokenServerUrl, visionAnalysis],
+  );
 
   const handleNext = useCallback(() => {
     pendingTapAdvanceRef.current = true;
@@ -297,7 +365,7 @@ function GuidedLessonRun({
               Step {lesson.currentStep.n} of {lesson.plan.steps.length}
             </Text>
             <Text style={styles.voiceText}>
-              {voiceMode === "realtime" ? "live voice" : "device voice"}
+              {voiceMode === "realtime" ? "live voice" : "push to talk"}
             </Text>
           </View>
           <Text style={styles.narration}>{lesson.currentStep.say}</Text>
@@ -306,15 +374,30 @@ function GuidedLessonRun({
               {currentVisionAnalysis.observation}
             </Text>
           ) : null}
-          <Pressable
-            accessibilityLabel="Next step"
-            accessibilityRole="button"
-            onPress={handleNext}
-            style={styles.nextButton}
-          >
-            <Text style={styles.nextButtonText}>next</Text>
-          </Pressable>
-          <Text style={styles.hint}>say “done” or tap next when you are ready.</Text>
+          {voiceAnswer ? (
+            <Text accessibilityLabel="Tutor answer" style={styles.voiceAnswer}>
+              {voiceAnswer}
+            </Text>
+          ) : null}
+          <View style={styles.actionRow}>
+            {tokenServerUrl ? (
+              <PushToTalkButton
+                busy={voiceBusy}
+                idleLabel="hold to ask"
+                onClip={(clip) => void handleVoiceClip(clip)}
+                style={styles.talkButton}
+              />
+            ) : null}
+            <Pressable
+              accessibilityLabel="Next step"
+              accessibilityRole="button"
+              onPress={handleNext}
+              style={styles.nextButton}
+            >
+              <Text style={styles.nextButtonText}>next</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.hint}>hold the mic to ask. tap next when you are ready.</Text>
         </View>
       </View>
     </CameraStage>
@@ -406,10 +489,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
+  voiceAnswer: {
+    color: "#f2f4f7",
+    fontSize: 14,
+    fontStyle: "italic",
+    lineHeight: 20,
+  },
+  actionRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  talkButton: {
+    flex: 1,
+  },
   nextButton: {
     alignItems: "center",
     backgroundColor: "#d8ff69",
     borderRadius: 14,
+    flex: 1,
+    justifyContent: "center",
     paddingHorizontal: 18,
     paddingVertical: 15,
   },

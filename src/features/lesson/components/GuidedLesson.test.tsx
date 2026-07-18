@@ -11,11 +11,6 @@ jest.mock("react-native-webrtc", () => ({
   registerGlobals: jest.fn(),
 }));
 
-jest.mock("expo-speech", () => ({
-  speak: jest.fn(),
-  stop: jest.fn(),
-}));
-
 jest.mock("../../camera/components/CameraStage", () => {
   const React = require("react");
   const { View } = require("react-native");
@@ -32,6 +27,41 @@ jest.mock("../../camera/components/CameraStage", () => {
 
   return { CameraStage };
 });
+
+jest.mock("../../voice/components/PushToTalkButton", () => {
+  const React = require("react");
+  const { Pressable, Text } = require("react-native");
+
+  return {
+    PushToTalkButton: ({
+      onClip,
+      busy = false,
+    }: {
+      onClip(clip: { audioBase64: string; mimeType: string }): void;
+      busy?: boolean;
+    }) =>
+      React.createElement(
+        Pressable,
+        {
+          accessibilityLabel: "Talk to the tutor",
+          disabled: busy,
+          onPress: () => onClip({ audioBase64: "aGVsbG8=", mimeType: "audio/m4a" }),
+        },
+        React.createElement(Text, null, "hold to ask"),
+      ),
+  };
+});
+
+jest.mock("../../voice/lib/play-voice-reply", () => ({
+  playVoiceReply: jest.fn().mockResolvedValue(undefined),
+  stopVoicePlayback: jest.fn(),
+}));
+
+jest.mock("../../voice/api-client/voice-api", () => ({
+  askVoiceQuestion: jest.fn(),
+  narrateText: jest.fn().mockResolvedValue("bXAz"),
+  transcribeVoiceClip: jest.fn(),
+}));
 
 jest.mock("../../spatial/components/SpatialOverlay", () => {
   const React = require("react");
@@ -99,7 +129,7 @@ describe("GuidedLesson", () => {
     expect(screen.queryByRole("button", { name: "Next step" })).toBeNull();
   });
 
-  it("keeps the annotated lesson running with device voice when live WebRTC is unavailable", async () => {
+  it("keeps the annotated lesson running with push-to-talk voice when live WebRTC is unavailable", async () => {
     const narrate = jest.fn();
     const createSession = jest
       .fn()
@@ -115,7 +145,7 @@ describe("GuidedLesson", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("device voice")).toBeTruthy();
+      expect(screen.getByText("push to talk")).toBeTruthy();
       expect(narrate).toHaveBeenCalledWith("Place the bare board in the square.");
     });
 
@@ -156,5 +186,44 @@ describe("GuidedLesson", () => {
       expect(screen.getByLabelText("Overlay world with 1 primitives")).toBeTruthy();
       expect(screen.getByText("the paper point is visible at the center.")).toBeTruthy();
     });
+  });
+
+  it("answers a held-mic question with the current step context and speaks the reply", async () => {
+    const askQuestion = jest.fn().mockResolvedValue({
+      transcript: "which pad is first?",
+      reply: "Start with the pad nearest the corner.",
+      replyAudioBase64: "bXAz",
+    });
+    const playReply = jest.fn().mockResolvedValue(undefined);
+
+    await render(
+      <GuidedLesson
+        plan={plan}
+        tokenServerUrl="http://192.168.1.20:3000"
+        createSession={jest
+          .fn()
+          .mockRejectedValue(new Error("live voice requires a birdseye development build"))}
+        askQuestion={askQuestion}
+        playReply={playReply}
+      />,
+    );
+
+    await fireEvent.press(screen.getByLabelText("Talk to the tutor"));
+
+    await waitFor(() => {
+      expect(askQuestion).toHaveBeenCalledWith(
+        {
+          audioBase64: "aGVsbG8=",
+          mimeType: "audio/m4a",
+          goal: "assemble a simple pcb",
+          step: { n: 1, say: "Place the bare board in the square." },
+        },
+        { baseUrl: "http://192.168.1.20:3000" },
+      );
+      expect(screen.getByLabelText("Tutor answer")).toBeTruthy();
+      expect(screen.getByText("Start with the pad nearest the corner.")).toBeTruthy();
+    });
+
+    expect(playReply).toHaveBeenCalledWith("bXAz");
   });
 });

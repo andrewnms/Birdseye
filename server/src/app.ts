@@ -8,6 +8,12 @@ import {
   parseVisionObservation,
   type VisionAnalyzer,
 } from "./vision";
+import {
+  parseNarrationText,
+  parseVoiceChatRequest,
+  parseVoiceClip,
+  type VoiceService,
+} from "./voice";
 
 type ServerOptions = {
   clientSecretMinter: RealtimeClientSecretMinter;
@@ -15,6 +21,7 @@ type ServerOptions = {
     create(goal: string): Promise<LessonPlan>;
   };
   visionAnalyzer: VisionAnalyzer;
+  voiceService: VoiceService;
 };
 
 const clientSecretLimit = 12;
@@ -77,6 +84,7 @@ export function createServerApp({
   clientSecretMinter,
   planner,
   visionAnalyzer,
+  voiceService,
 }: ServerOptions) {
   const app = express();
   const clientSecretAttempts = new Map<string, { count: number; expiresAt: number }>();
@@ -146,6 +154,72 @@ export function createServerApp({
         error instanceof Error ? error.message : "unknown server error",
       );
       response.status(502).json({ error: "Unable to analyze the camera frame right now." });
+    }
+  });
+  app.post("/voice/transcribe", async (request, response) => {
+    const clip = parseVoiceClip(request.body);
+
+    if (!clip) {
+      response.status(400).json({ error: "A valid bounded voice clip is required." });
+      return;
+    }
+
+    try {
+      const transcript = await voiceService.transcribe(clip);
+      response.set("Cache-Control", "no-store");
+      response.json({ transcript });
+    } catch (error) {
+      console.error(
+        "Birdseye voice transcription failed:",
+        error instanceof Error ? error.message : "unknown server error",
+      );
+      response.status(502).json({ error: "Unable to transcribe the voice clip right now." });
+    }
+  });
+  app.post("/voice/narrate", async (request, response) => {
+    const text = parseNarrationText(
+      typeof request.body === "object" && request.body !== null
+        ? (request.body as Record<string, unknown>).text
+        : null,
+    );
+
+    if (!text) {
+      response.status(400).json({ error: "Narration text up to 1000 characters is required." });
+      return;
+    }
+
+    try {
+      const audioBase64 = await voiceService.narrate(text);
+      response.set("Cache-Control", "no-store");
+      response.json({ audioBase64 });
+    } catch (error) {
+      console.error(
+        "Birdseye narration failed:",
+        error instanceof Error ? error.message : "unknown server error",
+      );
+      response.status(502).json({ error: "Unable to narrate this step right now." });
+    }
+  });
+  app.post("/voice/chat", async (request, response) => {
+    const chatRequest = parseVoiceChatRequest(request.body);
+
+    if (!chatRequest) {
+      response
+        .status(400)
+        .json({ error: "A valid voice clip with its lesson context is required." });
+      return;
+    }
+
+    try {
+      const reply = await voiceService.chat(chatRequest);
+      response.set("Cache-Control", "no-store");
+      response.json(reply);
+    } catch (error) {
+      console.error(
+        "Birdseye voice chat failed:",
+        error instanceof Error ? error.message : "unknown server error",
+      );
+      response.status(502).json({ error: "Unable to answer the voice question right now." });
     }
   });
   app.post("/realtime/client-secret", async (request, response) => {

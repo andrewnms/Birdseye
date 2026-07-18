@@ -1,41 +1,58 @@
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
-import { getCachedCranePlan } from "./src/features/lesson/lib/cached-crane-plan";
+import { CameraStage } from "./src/features/camera/components/CameraStage";
 import type { LessonPlan } from "./src/features/lesson/lib/plan";
 import { GuidedLesson } from "./src/features/lesson/components/GuidedLesson";
-import { LiveGoalEntry } from "./src/features/live-goals/client";
 import { getLiveLessonPlan } from "./src/features/planner/api-client/get-live-lesson-plan";
+import {
+  PushToTalkButton,
+  type RecordedVoiceClip,
+} from "./src/features/voice/components/PushToTalkButton";
+import { transcribeVoiceClip } from "./src/features/voice/api-client/voice-api";
 
-const tokenServerUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
-
-function unavailablePlanner(): Promise<LessonPlan> {
-  return Promise.reject(
-    new Error(
-      "the local planner is not configured. add EXPO_PUBLIC_API_URL to .env.local and restart Expo.",
-    ),
-  );
-}
+type LaunchState =
+  | { phase: "idle" }
+  | { phase: "transcribing" }
+  | { phase: "planning"; goal: string }
+  | { phase: "error"; message: string };
 
 export default function App() {
+  const tokenServerUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
   const [activePlan, setActivePlan] = useState<LessonPlan | null>(null);
-
-  const startCraneDemo = useCallback(() => {
-    setActivePlan(getCachedCranePlan());
-  }, []);
+  const [launch, setLaunch] = useState<LaunchState>({ phase: "idle" });
 
   const returnHome = useCallback(() => {
     setActivePlan(null);
+    setLaunch({ phase: "idle" });
   }, []);
 
-  const getPlan = useCallback(
-    (goal: string) =>
-      tokenServerUrl
-        ? getLiveLessonPlan(goal, { baseUrl: tokenServerUrl })
-        : unavailablePlanner(),
-    [],
-  );
+  const handleGoalClip = useCallback(async (clip: RecordedVoiceClip) => {
+    if (!tokenServerUrl) {
+      setLaunch({
+        phase: "error",
+        message:
+          "the local server is not configured. add EXPO_PUBLIC_API_URL to .env.local and restart Expo.",
+      });
+      return;
+    }
+
+    try {
+      setLaunch({ phase: "transcribing" });
+      const goal = await transcribeVoiceClip(clip, { baseUrl: tokenServerUrl });
+      setLaunch({ phase: "planning", goal });
+      const plan = await getLiveLessonPlan(goal, { baseUrl: tokenServerUrl });
+      setActivePlan(plan);
+      setLaunch({ phase: "idle" });
+    } catch (error) {
+      setLaunch({
+        phase: "error",
+        message:
+          error instanceof Error ? error.message : "something went wrong. try again.",
+      });
+    }
+  }, [tokenServerUrl]);
 
   if (activePlan) {
     return (
@@ -50,57 +67,51 @@ export default function App() {
     );
   }
 
+  const busy = launch.phase === "transcribing" || launch.phase === "planning";
+
   return (
-    <View style={styles.screen}>
+    <CameraStage>
       <StatusBar style="light" />
-      <View style={styles.header}>
-        <Text style={styles.eyebrow}>birdseye</Text>
-        <Text style={styles.title}>learn the physical step in front of you.</Text>
-        <Text style={styles.intro}>
-          camera guidance for a paper crane, a pcb, a workbench, or the next thing
-          you are trying to make.
-        </Text>
+      <View pointerEvents="box-none" style={styles.launchChrome}>
+        <View style={styles.launchHeader}>
+          <Text style={styles.eyebrow}>birdseye</Text>
+          <Text style={styles.launchTitle}>
+            point at your work and say what you want to learn.
+          </Text>
+        </View>
+        <View style={styles.launchFooter}>
+          {launch.phase === "planning" ? (
+            <Text style={styles.statusText}>building your lesson for “{launch.goal}”…</Text>
+          ) : null}
+          {launch.phase === "error" ? (
+            <Text style={styles.errorText}>{launch.message}</Text>
+          ) : null}
+          <PushToTalkButton
+            busy={busy}
+            busyLabel={launch.phase === "planning" ? "planning…" : "listening back…"}
+            idleLabel="hold and say your goal"
+            onClip={handleGoalClip}
+          />
+          <Text style={styles.safetyCopy}>
+            use this as guidance, not safety clearance for heat, blades, mains power,
+            or food allergies.
+          </Text>
+        </View>
       </View>
-
-      <View style={styles.demoCard}>
-        <Text style={styles.cardEyebrow}>reliable demo</Text>
-        <Text style={styles.cardTitle}>paper crane</Text>
-        <Text style={styles.cardCopy}>
-          a cached six-step run with voice cues and world-locked overlays.
-        </Text>
-        <Pressable
-          accessibilityLabel="Cached crane lesson"
-          accessibilityRole="button"
-          onPress={startCraneDemo}
-          style={styles.demoButton}
-        >
-          <Text style={styles.demoButtonText}>start crane lesson</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.liveCard}>
-        <Text style={styles.cardEyebrow}>live planner</Text>
-        <LiveGoalEntry getPlan={getPlan} onPlanReady={setActivePlan} />
-      </View>
-
-      <Text style={styles.safetyCopy}>
-        use this as guidance, not safety clearance for heat, blades, mains power, or
-        food allergies.
-      </Text>
-    </View>
+    </CameraStage>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    backgroundColor: "#081018",
-    flex: 1,
-    gap: 18,
-    justifyContent: "center",
+  launchChrome: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "space-between",
     padding: 24,
+    paddingBottom: 32,
+    paddingTop: 64,
   },
-  header: {
-    gap: 9,
+  launchHeader: {
+    gap: 8,
   },
   eyebrow: {
     color: "#d8ff69",
@@ -109,64 +120,34 @@ const styles = StyleSheet.create({
     letterSpacing: 1.6,
     textTransform: "uppercase",
   },
-  title: {
+  launchTitle: {
     color: "#ffffff",
-    fontSize: 34,
+    fontSize: 28,
     fontWeight: "800",
-    letterSpacing: -0.8,
-    lineHeight: 40,
+    letterSpacing: -0.6,
+    lineHeight: 34,
+    textShadowColor: "rgba(0, 0, 0, 0.55)",
+    textShadowRadius: 8,
   },
-  intro: {
-    color: "#c5d0dd",
-    fontSize: 16,
-    lineHeight: 23,
+  launchFooter: {
+    gap: 12,
   },
-  demoCard: {
-    backgroundColor: "#d8ff69",
-    borderRadius: 24,
-    gap: 9,
-    padding: 20,
-  },
-  liveCard: {
-    backgroundColor: "#f3f7fa",
-    borderRadius: 24,
-    gap: 9,
-    padding: 20,
-  },
-  cardEyebrow: {
-    color: "#475467",
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-  },
-  cardTitle: {
-    color: "#102109",
-    fontSize: 26,
-    fontWeight: "800",
-  },
-  cardCopy: {
-    color: "#32412a",
+  statusText: {
+    color: "#d8ff69",
     fontSize: 15,
-    lineHeight: 21,
+    fontWeight: "700",
+    textAlign: "center",
   },
-  demoButton: {
-    alignItems: "center",
-    alignSelf: "flex-start",
-    backgroundColor: "#102109",
-    borderRadius: 12,
-    marginTop: 5,
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-  },
-  demoButtonText: {
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: "800",
+  errorText: {
+    color: "#ffb4ab",
+    fontSize: 14,
+    fontWeight: "600",
+    textAlign: "center",
   },
   safetyCopy: {
-    color: "#98a2b3",
+    color: "rgba(255, 255, 255, 0.72)",
     fontSize: 12,
     lineHeight: 18,
+    textAlign: "center",
   },
 });

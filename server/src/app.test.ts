@@ -6,6 +6,7 @@ import { createServerApp } from "./app";
 import type { LessonPlan } from "../../src/features/lesson/lib/plan";
 import type { RealtimeClientSecretMinter } from "./realtime-client-secret";
 import type { VisionAnalyzer } from "./vision";
+import type { VoiceService } from "./voice";
 
 type Planner = {
   create(goal: string): Promise<LessonPlan>;
@@ -27,8 +28,9 @@ function createTestApp(
   clientSecretMinter: RealtimeClientSecretMinter = { mint: jest.fn() },
   planner: Planner = { create: jest.fn() },
   visionAnalyzer: VisionAnalyzer = { analyze: jest.fn() },
+  voiceService: VoiceService = { transcribe: jest.fn(), chat: jest.fn(), narrate: jest.fn() },
 ): Express {
-  return createServerApp({ clientSecretMinter, planner, visionAnalyzer });
+  return createServerApp({ clientSecretMinter, planner, visionAnalyzer, voiceService });
 }
 
 async function requestApp(app: Express, path: string, init?: AppRequest): Promise<AppResponse> {
