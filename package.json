@@ -20,6 +20,7 @@
     "react": "19.1.0",
     "react-native": "0.81.5",
     "react-native-safe-area-context": "~5.6.0",
+    "react-native-svg": "15.12.1",
     "react-native-webrtc": "^124.0.7",
     "three": "^0.185.1"
   },
@@ -55,6 +56,9 @@
   },
   "jest": {
     "preset": "jest-expo",
+    "setupFiles": [
+      "<rootDir>/jest-setup.js"
+    ],
     "testMatch": [
       "**/?(*.)+(test).[tj]s?(x)"
     ],

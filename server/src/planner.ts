@@ -161,6 +161,7 @@ export function createPlanner({
         },
         body: JSON.stringify({
           model,
+          reasoning: { effort: "low" },
           input: [
             { role: "developer", content: plannerInstructions },
             { role: "user", content: normalizedGoal },

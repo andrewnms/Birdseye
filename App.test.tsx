@@ -93,7 +93,7 @@ describe("Birdseye app", () => {
 
     await render(<App />);
 
-    expect(screen.getByText(/say what you want to learn/)).toBeTruthy();
+    expect(screen.getByText(/point at your work/)).toBeTruthy();
 
     await fireEvent.press(screen.getByLabelText("Talk to the tutor"));
 

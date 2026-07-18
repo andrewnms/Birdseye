@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LinearGradient } from "expo-linear-gradient";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { cardShadow, gradients, palette, radius } from "../../design/tokens";
 
 import {
   CameraStage,
@@ -87,6 +91,7 @@ function GuidedLessonRun({
   askQuestion = askVoiceQuestion,
   playReply = playVoiceReply,
 }: GuidedLessonProps) {
+  const insets = useSafeAreaInsets();
   const [lesson, setLesson] = useState<LessonSession>(() => startLesson(plan));
   const [toolOverlay, setToolOverlay] = useState<SpatialOverlayPrimitive[] | null>(
     null,
@@ -310,22 +315,28 @@ function GuidedLessonRun({
 
   if (lesson.status === "complete") {
     return (
-      <CameraStage>
-        <View accessibilityLabel="Lesson complete" style={styles.completionScreen}>
-          <Text style={styles.completionTitle}>lesson complete</Text>
-          <Text style={styles.completionCopy}>you finished {plan.goal}.</Text>
-          {onExit ? (
-            <Pressable
-              accessibilityLabel="Back to lessons"
-              accessibilityRole="button"
-              onPress={onExit}
-              style={styles.secondaryButton}
-            >
-              <Text style={styles.secondaryButtonText}>back to lessons</Text>
-            </Pressable>
-          ) : null}
+      <View accessibilityLabel="Lesson complete" style={styles.completionScreen}>
+        <View style={styles.successChip}>
+          <View style={styles.successCheck}>
+            <Text style={styles.successCheckMark}>✓</Text>
+          </View>
+          <Text style={styles.successChipText}>nice work!</Text>
         </View>
-      </CameraStage>
+        <Text style={styles.completionTitle}>you did it</Text>
+        <Text style={styles.completionCopy}>you finished {plan.goal}.</Text>
+        {onExit ? (
+          <Pressable
+            accessibilityLabel="Back to lessons"
+            accessibilityRole="button"
+            onPress={onExit}
+            style={styles.completionButton}
+          >
+            <LinearGradient {...gradients.brandSweep} style={styles.completionButtonFace}>
+              <Text style={styles.completionButtonText}>learn something else →</Text>
+            </LinearGradient>
+          </Pressable>
+        ) : null}
+      </View>
     );
   }
 
@@ -338,66 +349,138 @@ function GuidedLessonRun({
     ? currentVisionAnalysis?.overlay ?? []
     : toolOverlay ?? lesson.currentStep.overlay;
 
+  const stepCount = lesson.plan.steps.length;
+
   return (
     <CameraStage ref={cameraRef}>
       <SpatialOverlay anchorMode="world" primitives={displayedOverlay} wireframe={wireframe} />
-      <View pointerEvents="box-none" style={styles.chrome}>
-        <View style={styles.topBar}>
-          <View style={styles.goalPill}>
-            <Text numberOfLines={1} style={styles.goalText}>
-              {plan.goal}
-            </Text>
+      <View pointerEvents="none" style={styles.scanFrame}>
+        <View style={[styles.scanCorner, styles.scanTopLeft]} />
+        <View style={[styles.scanCorner, styles.scanTopRight]} />
+        <View style={[styles.scanCorner, styles.scanBottomLeft]} />
+        <View style={[styles.scanCorner, styles.scanBottomRight]} />
+      </View>
+      <View
+        pointerEvents="box-none"
+        style={[
+          styles.chrome,
+          { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 14 },
+        ]}
+      >
+        <View pointerEvents="box-none" style={styles.topSection}>
+          <View pointerEvents="box-none" style={styles.topRow}>
+            {onExit ? (
+              <Pressable
+                accessibilityLabel="Back to lessons"
+                accessibilityRole="button"
+                onPress={onExit}
+                style={styles.backButton}
+              >
+                <Text style={styles.backGlyph}>‹</Text>
+              </Pressable>
+            ) : null}
+            <View style={styles.progressCard}>
+              <View style={styles.progressHead}>
+                <View style={styles.progressTitles}>
+                  <Text numberOfLines={1} style={styles.progressTitle}>
+                    {plan.goal}
+                  </Text>
+                  <Text style={styles.progressKicker}>your goal</Text>
+                </View>
+                <Text style={styles.voiceBadge}>
+                  {voiceMode === "realtime" ? "live voice" : "push to talk"}
+                </Text>
+              </View>
+              <View style={styles.track}>
+                {lesson.plan.steps.map((step, index) => (
+                  <Fragment key={step.n}>
+                    <View
+                      style={[
+                        styles.trackDot,
+                        index < lesson.stepIndex && styles.trackDotDone,
+                        index === lesson.stepIndex && styles.trackDotActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.trackDotText,
+                          index <= lesson.stepIndex && styles.trackDotTextOn,
+                        ]}
+                      >
+                        {index < lesson.stepIndex ? "✓" : step.n}
+                      </Text>
+                    </View>
+                    {index < stepCount - 1 ? (
+                      <View
+                        style={[
+                          styles.trackSegment,
+                          index < lesson.stepIndex && styles.trackSegmentDone,
+                        ]}
+                      />
+                    ) : null}
+                  </Fragment>
+                ))}
+              </View>
+            </View>
           </View>
-          {onExit ? (
-            <Pressable
-              accessibilityLabel="Back to lessons"
-              accessibilityRole="button"
-              onPress={onExit}
-              style={styles.closeButton}
-            >
-              <Text style={styles.closeButtonText}>close</Text>
-            </Pressable>
+          {currentVisionAnalysis ? (
+            <View style={styles.detectPill}>
+              <View style={styles.detectDot} />
+              <Text
+                accessibilityLabel="Camera observation"
+                style={styles.detectText}
+              >
+                {currentVisionAnalysis.observation}
+              </Text>
+            </View>
           ) : null}
         </View>
-        <View style={styles.bottomCard}>
-          <View style={styles.stepRow}>
-            <Text style={styles.stepText}>
-              Step {lesson.currentStep.n} of {lesson.plan.steps.length}
-            </Text>
-            <Text style={styles.voiceText}>
-              {voiceMode === "realtime" ? "live voice" : "push to talk"}
-            </Text>
-          </View>
-          <Text style={styles.narration}>{lesson.currentStep.say}</Text>
-          {currentVisionAnalysis ? (
-            <Text accessibilityLabel="Camera observation" style={styles.observation}>
-              {currentVisionAnalysis.observation}
-            </Text>
-          ) : null}
+        <View pointerEvents="box-none" style={styles.bottomSection}>
           {voiceAnswer ? (
-            <Text accessibilityLabel="Tutor answer" style={styles.voiceAnswer}>
-              {voiceAnswer}
-            </Text>
+            <View style={styles.coachChip}>
+              <Text accessibilityLabel="Tutor answer" style={styles.coachText}>
+                {voiceAnswer}
+              </Text>
+            </View>
           ) : null}
-          <View style={styles.actionRow}>
+          <View pointerEvents="box-none" style={styles.bottomRow}>
+            <View style={styles.stepChip}>
+              <View style={styles.stepLabelRow}>
+                <Text style={styles.stepText}>
+                  Step {lesson.currentStep.n} of {stepCount}
+                </Text>
+                <View style={styles.miniDots}>
+                  {lesson.plan.steps.map((step, index) => (
+                    <View
+                      key={step.n}
+                      style={[
+                        styles.miniDot,
+                        index <= lesson.stepIndex && styles.miniDotOn,
+                      ]}
+                    />
+                  ))}
+                </View>
+              </View>
+              <Text style={styles.narration}>{lesson.currentStep.say}</Text>
+              <Pressable
+                accessibilityLabel="Next step"
+                accessibilityRole="button"
+                onPress={handleNext}
+                style={styles.doneButton}
+              >
+                <LinearGradient {...gradients.brandSweep} style={styles.doneButtonFace}>
+                  <Text style={styles.doneButtonText}>done ✓</Text>
+                </LinearGradient>
+              </Pressable>
+            </View>
             {tokenServerUrl ? (
               <PushToTalkButton
                 busy={voiceBusy}
-                idleLabel="hold to ask"
                 onClip={(clip) => void handleVoiceClip(clip)}
-                style={styles.talkButton}
+                variant="mic"
               />
             ) : null}
-            <Pressable
-              accessibilityLabel="Next step"
-              accessibilityRole="button"
-              onPress={handleNext}
-              style={styles.nextButton}
-            >
-              <Text style={styles.nextButtonText}>next</Text>
-            </Pressable>
           </View>
-          <Text style={styles.hint}>hold the mic to ask. tap next when you are ready.</Text>
         </View>
       </View>
     </CameraStage>
@@ -414,142 +497,324 @@ export function GuidedLesson(props: GuidedLessonProps) {
   return <GuidedLessonRun key={lessonKey} {...props} />;
 }
 
+const scanCornerBase = {
+  borderColor: palette.white,
+  height: 26,
+  position: "absolute" as const,
+  width: 26,
+};
+
 const styles = StyleSheet.create({
   chrome: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "space-between",
-    padding: 20,
-    paddingBottom: 28,
+    paddingHorizontal: 14,
   },
-  topBar: {
+  scanFrame: {
+    alignSelf: "center",
+    height: 240,
+    position: "absolute",
+    top: "50%",
+    marginTop: -120,
+    width: 240,
+  },
+  scanCorner: scanCornerBase,
+  scanTopLeft: {
+    borderLeftWidth: 3,
+    borderTopLeftRadius: 9,
+    borderTopWidth: 3,
+    left: 0,
+    top: 0,
+  },
+  scanTopRight: {
+    borderRightWidth: 3,
+    borderTopRightRadius: 9,
+    borderTopWidth: 3,
+    right: 0,
+    top: 0,
+  },
+  scanBottomLeft: {
+    borderBottomLeftRadius: 9,
+    borderBottomWidth: 3,
+    borderLeftWidth: 3,
+    bottom: 0,
+    left: 0,
+  },
+  scanBottomRight: {
+    borderBottomRightRadius: 9,
+    borderBottomWidth: 3,
+    borderRightWidth: 3,
+    bottom: 0,
+    right: 0,
+  },
+  topSection: {
+    gap: 10,
+  },
+  topRow: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: 8,
+  },
+  backButton: {
+    alignItems: "center",
+    backgroundColor: "rgba(16, 26, 51, 0.5)",
+    borderColor: "rgba(255, 255, 255, 0.2)",
+    borderRadius: 17,
+    borderWidth: 1,
+    height: 34,
+    justifyContent: "center",
+    width: 34,
+  },
+  backGlyph: {
+    color: palette.white,
+    fontSize: 20,
+    fontWeight: "800",
+    lineHeight: 22,
+  },
+  progressCard: {
+    backgroundColor: "rgba(255, 255, 255, 0.96)",
+    borderRadius: 18,
+    flex: 1,
+    gap: 9,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    ...cardShadow,
+  },
+  progressHead: {
     alignItems: "center",
     flexDirection: "row",
-    gap: 10,
-    justifyContent: "space-between",
+    gap: 9,
   },
-  goalPill: {
-    backgroundColor: "rgba(8, 15, 24, 0.76)",
-    borderColor: "rgba(255, 255, 255, 0.22)",
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
+  progressTitles: {
     flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
   },
-  goalText: {
-    color: "#ffffff",
+  progressTitle: {
+    color: palette.navy,
     fontSize: 14,
     fontWeight: "700",
+    lineHeight: 16,
   },
-  closeButton: {
+  progressKicker: {
+    color: palette.softText,
+    fontSize: 8,
+    fontWeight: "700",
+    letterSpacing: 1.1,
+    textTransform: "uppercase",
+  },
+  voiceBadge: {
+    color: palette.teal,
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
+  track: {
     alignItems: "center",
-    backgroundColor: "rgba(8, 15, 24, 0.76)",
-    borderColor: "rgba(255, 255, 255, 0.22)",
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 13,
-    paddingVertical: 9,
+    flexDirection: "row",
   },
-  closeButtonText: {
-    color: "#ffffff",
+  trackDot: {
+    alignItems: "center",
+    backgroundColor: palette.white,
+    borderColor: palette.line,
+    borderRadius: 14,
+    borderWidth: 2,
+    height: 28,
+    justifyContent: "center",
+    width: 28,
+  },
+  trackDotDone: {
+    backgroundColor: palette.success,
+    borderColor: palette.success,
+  },
+  trackDotActive: {
+    backgroundColor: palette.sky,
+    borderColor: palette.sky,
+  },
+  trackDotText: {
+    color: palette.softText,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  trackDotTextOn: {
+    color: palette.white,
+  },
+  trackSegment: {
+    backgroundColor: palette.line,
+    borderRadius: 2,
+    flex: 1,
+    height: 3,
+    marginHorizontal: 5,
+  },
+  trackSegmentDone: {
+    backgroundColor: palette.success,
+  },
+  detectPill: {
+    alignItems: "center",
+    alignSelf: "center",
+    backgroundColor: "rgba(16, 26, 51, 0.78)",
+    borderRadius: 999,
+    flexDirection: "row",
+    gap: 8,
+    maxWidth: "94%",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  detectDot: {
+    backgroundColor: palette.signal,
+    borderRadius: 4,
+    height: 8,
+    shadowColor: palette.signal,
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
+    width: 8,
+  },
+  detectText: {
+    color: palette.white,
+    flexShrink: 1,
     fontSize: 13,
     fontWeight: "700",
+    lineHeight: 18,
   },
-  bottomCard: {
-    backgroundColor: "rgba(8, 15, 24, 0.9)",
-    borderColor: "rgba(255, 255, 255, 0.16)",
-    borderRadius: 24,
-    borderWidth: StyleSheet.hairlineWidth,
-    gap: 14,
-    padding: 18,
+  bottomSection: {
+    gap: 10,
   },
-  stepRow: {
+  coachChip: {
+    backgroundColor: palette.white,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    ...cardShadow,
+  },
+  coachText: {
+    color: palette.navy,
+    fontSize: 14.5,
+    fontWeight: "600",
+    lineHeight: 20,
+  },
+  bottomRow: {
+    alignItems: "flex-end",
+    flexDirection: "row",
+    gap: 10,
+  },
+  stepChip: {
+    backgroundColor: palette.white,
+    borderRadius: 16,
+    flex: 1,
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    ...cardShadow,
+  },
+  stepLabelRow: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
   },
   stepText: {
-    color: "#d0d5dd",
-    fontSize: 14,
-    fontWeight: "700",
+    color: palette.stepLabel,
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
   },
-  voiceText: {
-    color: "#8bd6b4",
-    fontSize: 13,
-    fontWeight: "700",
+  miniDots: {
+    flexDirection: "row",
+    gap: 5,
+  },
+  miniDot: {
+    backgroundColor: palette.line,
+    borderRadius: 3,
+    height: 5.5,
+    width: 5.5,
+  },
+  miniDotOn: {
+    backgroundColor: palette.sky,
   },
   narration: {
-    color: "#ffffff",
-    fontSize: 20,
-    fontWeight: "700",
-    lineHeight: 28,
+    color: palette.navy,
+    fontSize: 18,
+    fontWeight: "600",
+    lineHeight: 25,
   },
-  observation: {
-    color: "#a4f4d1",
-    fontSize: 14,
-    lineHeight: 20,
+  doneButton: {
+    borderRadius: 999,
+    overflow: "hidden",
   },
-  voiceAnswer: {
-    color: "#f2f4f7",
-    fontSize: 14,
-    fontStyle: "italic",
-    lineHeight: 20,
-  },
-  actionRow: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  talkButton: {
-    flex: 1,
-  },
-  nextButton: {
+  doneButtonFace: {
     alignItems: "center",
-    backgroundColor: "#d8ff69",
-    borderRadius: 14,
-    flex: 1,
     justifyContent: "center",
+    minHeight: 44,
     paddingHorizontal: 18,
-    paddingVertical: 15,
   },
-  nextButtonText: {
-    color: "#102109",
-    fontSize: 16,
-    fontWeight: "800",
-  },
-  hint: {
-    color: "#d0d5dd",
-    fontSize: 13,
-    textAlign: "center",
+  doneButtonText: {
+    color: palette.white,
+    fontSize: 14.5,
+    fontWeight: "700",
   },
   completionScreen: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
-    backgroundColor: "rgba(8, 15, 24, 0.72)",
+    backgroundColor: palette.cloud,
     gap: 14,
     justifyContent: "center",
-    padding: 32,
+    padding: 28,
+  },
+  successChip: {
+    alignItems: "center",
+    backgroundColor: palette.white,
+    borderColor: palette.line,
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    ...cardShadow,
+  },
+  successCheck: {
+    alignItems: "center",
+    backgroundColor: palette.success,
+    borderRadius: 13,
+    height: 26,
+    justifyContent: "center",
+    width: 26,
+  },
+  successCheckMark: {
+    color: palette.white,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  successChipText: {
+    color: palette.navy,
+    fontSize: 15,
+    fontWeight: "700",
   },
   completionTitle: {
-    color: "#d8ff69",
-    fontSize: 30,
+    color: palette.navy,
+    fontSize: 27,
     fontWeight: "800",
   },
   completionCopy: {
-    color: "#ffffff",
-    fontSize: 18,
+    color: palette.mutedText,
+    fontSize: 15,
+    fontWeight: "500",
     textAlign: "center",
   },
-  secondaryButton: {
-    borderColor: "#ffffff",
-    borderRadius: 12,
-    borderWidth: 1,
+  completionButton: {
+    borderRadius: 999,
     marginTop: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    overflow: "hidden",
+    width: 250,
   },
-  secondaryButtonText: {
-    color: "#ffffff",
-    fontSize: 15,
+  completionButtonFace: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 50,
+    paddingHorizontal: 22,
+  },
+  completionButtonText: {
+    color: palette.white,
+    fontSize: 15.5,
     fontWeight: "700",
   },
 });

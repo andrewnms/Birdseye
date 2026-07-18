@@ -147,6 +147,7 @@ export function createVisionAnalyzer({
         body: JSON.stringify({
           model,
           store: false,
+          reasoning: { effort: "none" },
           input: [
             { role: "developer", content: visionInstructions },
             {

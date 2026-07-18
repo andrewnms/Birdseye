@@ -201,6 +201,7 @@ export function createVoiceService({
       body: JSON.stringify({
         model: chatModel,
         store: false,
+        reasoning: { effort: "none" },
         input: [
           { role: "developer", content: chatInstructions },
           { role: "user", content: context },

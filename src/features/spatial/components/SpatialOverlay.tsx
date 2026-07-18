@@ -8,11 +8,11 @@ import {
   useState,
 } from "react";
 import {
-  ArrowHelper,
   BufferGeometry,
+  ConeGeometry,
+  CylinderGeometry,
   Float32BufferAttribute,
   Group,
-  Line,
   LineBasicMaterial,
   LineSegments,
   Mesh,
@@ -21,6 +21,7 @@ import {
   QuadraticBezierCurve3,
   Scene,
   SphereGeometry,
+  TubeGeometry,
   Vector3,
   WebGLRenderer,
 } from "three";
@@ -57,7 +58,8 @@ import {
 import type { WireframeGeometry } from "../../model-preview";
 
 const cameraFovDegrees = 55;
-const overlayColor = 0xff3347;
+// design.md AR annotations: teal guide strokes, legible over any camera feed.
+const overlayColor = 0x3ed0b4;
 const defaultAnchorDistance = 2;
 
 type SceneInputs = {
@@ -155,18 +157,41 @@ function applyAnchorMode(
   state.anchorMode = anchorMode;
 }
 
-function createLine(
-  points: Vector3[],
-  opacity = 0.95,
-): Line<BufferGeometry, LineBasicMaterial> {
-  const geometry = new BufferGeometry().setFromPoints(points);
-  const material = new LineBasicMaterial({
-    color: overlayColor,
-    transparent: true,
-    opacity,
-  });
+// GL renders classic lines at 1px regardless of linewidth, which is unreadable
+// over a live camera feed. Strokes are therefore built from solid geometry.
+const strokeRadius = 0.024;
+const upAxis = new Vector3(0, 1, 0);
 
-  return new Line(geometry, material);
+function overlayMaterial(opacity = 0.95): MeshBasicMaterial {
+  return new MeshBasicMaterial({ color: overlayColor, transparent: true, opacity });
+}
+
+function addStroke(group: Group, from: Vector3, to: Vector3, opacity = 0.95): void {
+  const direction = to.clone().sub(from);
+  const length = direction.length();
+
+  if (length <= Number.EPSILON) {
+    return;
+  }
+
+  const shaft = new Mesh(
+    new CylinderGeometry(strokeRadius, strokeRadius, length, 10),
+    overlayMaterial(opacity),
+  );
+  shaft.position.copy(from.clone().add(to).multiplyScalar(0.5));
+  shaft.quaternion.setFromUnitVectors(upAxis, direction.normalize());
+  group.add(shaft);
+}
+
+function addArrowHead(group: Group, tip: Vector3, direction: Vector3): void {
+  const headLength = 0.18;
+  const head = new Mesh(
+    new ConeGeometry(headLength * 0.55, headLength, 14),
+    overlayMaterial(),
+  );
+  head.position.copy(tip.clone().sub(direction.clone().multiplyScalar(headLength / 2)));
+  head.quaternion.setFromUnitVectors(upAxis, direction);
+  group.add(head);
 }
 
 function addArrow(group: Group, from: Vector3, to: Vector3): void {
@@ -177,16 +202,11 @@ function addArrow(group: Group, from: Vector3, to: Vector3): void {
     return;
   }
 
-  const headLength = Math.min(0.18, Math.max(0.06, length * 0.24));
-  const arrow = new ArrowHelper(
-    direction.normalize(),
-    from,
-    length,
-    overlayColor,
-    headLength,
-    headLength * 0.62,
-  );
-  group.add(arrow);
+  direction.normalize();
+  const headLength = 0.18;
+  const shaftEnd = to.clone().sub(direction.clone().multiplyScalar(headLength * 0.72));
+  addStroke(group, from, shaftEnd);
+  addArrowHead(group, to, direction);
 }
 
 function addFoldCurve(group: Group, from: Vector3, to: Vector3): void {
@@ -202,14 +222,12 @@ function addFoldCurve(group: Group, from: Vector3, to: Vector3): void {
     .clone()
     .add(to)
     .multiplyScalar(0.5)
-    .add(perpendicular.multiplyScalar(Math.min(0.28, length * 0.32)));
+    .add(perpendicular.multiplyScalar(Math.min(0.4, length * 0.4)));
   const curve = new QuadraticBezierCurve3(from, control, to);
-  const points = curve.getPoints(24);
-  group.add(createLine(points));
+  group.add(new Mesh(new TubeGeometry(curve, 24, strokeRadius, 8), overlayMaterial()));
 
-  const arrowOrigin = curve.getPoint(0.8);
-  const arrowEnd = curve.getPoint(0.98);
-  addArrow(group, arrowOrigin, arrowEnd);
+  const tangent = curve.getTangent(1).normalize();
+  addArrowHead(group, curve.getPoint(1), tangent);
 }
 
 function addWireframe(group: Group, wireframe: WireframeGeometry): void {
@@ -225,7 +243,7 @@ function addWireframe(group: Group, wireframe: WireframeGeometry): void {
   const lines = new LineSegments(
     geometry,
     new LineBasicMaterial({
-      color: 0x7ce7ff,
+      color: 0x4c8dff,
       transparent: true,
       opacity: 0.72,
     }),
@@ -282,20 +300,12 @@ function buildOverlayGeometry(state: OverlaySceneState, inputs: SceneInputs): vo
     }
 
     if (primitive.type === "crease_line") {
-      const from = toWorld(primitive.from);
-      const to = toWorld(primitive.to);
-
-      if (!from.equals(to)) {
-        state.overlayGroup.add(createLine([from, to], 0.8));
-      }
+      addStroke(state.overlayGroup, toWorld(primitive.from), toWorld(primitive.to), 0.85);
       return;
     }
 
     if (primitive.type === "dot") {
-      const dot = new Mesh(
-        new SphereGeometry(0.035, 12, 10),
-        new MeshBasicMaterial({ color: overlayColor }),
-      );
+      const dot = new Mesh(new SphereGeometry(0.09, 14, 12), overlayMaterial(1));
       dot.position.copy(toWorld(primitive.at));
       state.overlayGroup.add(dot);
       return;
@@ -591,19 +601,22 @@ const styles = StyleSheet.create({
   },
   label: {
     position: "absolute",
-    transform: [{ translateX: "-50%" }, { translateY: -28 }],
-    maxWidth: 180,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: "rgba(20, 8, 10, 0.76)",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#ff7180",
+    transform: [{ translateX: "-50%" }, { translateY: -44 }],
+    maxWidth: 290,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    shadowColor: "#16213E",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.42,
+    shadowRadius: 10,
+    elevation: 6,
   },
   labelText: {
-    color: "#ffe9ec",
-    fontSize: 13,
-    fontWeight: "700",
+    color: "#16213E",
+    fontSize: 20,
+    fontWeight: "800",
     textAlign: "center",
   },
 });
