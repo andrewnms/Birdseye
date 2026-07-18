@@ -11,9 +11,11 @@ import {
 import {
   ArrowHelper,
   BufferGeometry,
+  Float32BufferAttribute,
   Group,
   Line,
   LineBasicMaterial,
+  LineSegments,
   Mesh,
   MeshBasicMaterial,
   PerspectiveCamera,
@@ -47,6 +49,7 @@ import {
   parseSpatialOverlayPrimitives,
   type SpatialOverlayPrimitive,
 } from "../lib/overlay-primitives";
+import type { WireframeGeometry } from "../../model-preview";
 
 const cameraFovDegrees = 55;
 const overlayColor = 0xff3347;
@@ -54,6 +57,7 @@ const defaultAnchorDistance = 2;
 
 type SceneInputs = {
   primitives: SpatialOverlayPrimitive[];
+  wireframe: WireframeGeometry | null;
   alignmentSquare?: AlignmentSquare;
   anchorDistance: number;
 };
@@ -90,6 +94,8 @@ type DisposableObject = {
 export type SpatialOverlayProps = {
   /** Untrusted tool-call payloads are accepted and invalid primitives are ignored. */
   primitives?: readonly unknown[];
+  /** Optional validated local shape from the planner, rendered as transparent lines. */
+  wireframe?: WireframeGeometry | null;
   /** Local coordinates of the visible square the learner aligns their work to. */
   alignmentSquare?: AlignmentSquare;
   /** Distance from the initial camera pose to the fixed annotation plane. */
@@ -178,6 +184,32 @@ function addFoldCurve(group: Group, from: Vector3, to: Vector3): void {
   addArrow(group, arrowOrigin, arrowEnd);
 }
 
+function addWireframe(group: Group, wireframe: WireframeGeometry): void {
+  if (wireframe.positions.length === 0) {
+    return;
+  }
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new Float32BufferAttribute([...wireframe.positions], 3),
+  );
+  const lines = new LineSegments(
+    geometry,
+    new LineBasicMaterial({
+      color: 0x7ce7ff,
+      transparent: true,
+      opacity: 0.72,
+    }),
+  );
+
+  // The planner emits a rough local shape around its origin. Keep that subtle
+  // preview inside the camera's world plane instead of covering the guidance.
+  lines.scale.setScalar(0.32);
+  lines.position.set(-0.16, -0.16, 0.04);
+  group.add(lines);
+}
+
 function buildOverlayGeometry(state: OverlaySceneState, inputs: SceneInputs): void {
   disposeOverlayGroup(state.overlayGroup);
   state.labels = [];
@@ -197,6 +229,10 @@ function buildOverlayGeometry(state: OverlaySceneState, inputs: SceneInputs): vo
       distance,
       cameraFovDegrees,
     );
+
+  if (inputs.wireframe) {
+    addWireframe(state.overlayGroup, inputs.wireframe);
+  }
 
   inputs.primitives.forEach((primitive, index) => {
     if (primitive.type === "arrow") {
@@ -297,6 +333,7 @@ function disposeScene(state: OverlaySceneState): void {
  */
 export function SpatialOverlay({
   primitives = [],
+  wireframe = null,
   alignmentSquare,
   anchorDistance = defaultAnchorDistance,
   style,
@@ -311,16 +348,15 @@ export function SpatialOverlay({
     () => parseSpatialOverlayPrimitives(primitives),
     [primitives],
   );
-  const inputsRef = useRef<SceneInputs>({
-    primitives: [],
-    anchorDistance: defaultAnchorDistance,
-  });
-
-  inputsRef.current = {
-    primitives: parsedPrimitives,
-    alignmentSquare,
-    anchorDistance: normalizedAnchorDistance(anchorDistance),
-  };
+  const inputs = useMemo<SceneInputs>(
+    () => ({
+      primitives: parsedPrimitives,
+      wireframe,
+      alignmentSquare,
+      anchorDistance: normalizedAnchorDistance(anchorDistance),
+    }),
+    [alignmentSquare, anchorDistance, parsedPrimitives, wireframe],
+  );
 
   const refreshGeometry = useCallback(() => {
     const state = rendererStateRef.current;
@@ -329,10 +365,10 @@ export function SpatialOverlay({
       return;
     }
 
-    buildOverlayGeometry(state, inputsRef.current);
+    buildOverlayGeometry(state, inputs);
     state.camera.updateMatrixWorld(true);
     setProjectedLabels(projectLabels(state));
-  }, []);
+  }, [inputs]);
 
   const applyLatestRotation = useCallback(() => {
     const state = rendererStateRef.current;
@@ -386,13 +422,13 @@ export function SpatialOverlay({
         updateViewport(state, viewport);
       }
 
-      buildOverlayGeometry(state, inputsRef.current);
+      buildOverlayGeometry(state, inputs);
       applyLatestRotation();
       state.camera.updateMatrixWorld(true);
       setProjectedLabels(projectLabels(state));
       startRenderLoop(state);
     },
-    [applyLatestRotation],
+    [applyLatestRotation, inputs],
   );
 
   const handleLayout = useCallback(
@@ -414,7 +450,7 @@ export function SpatialOverlay({
 
   useEffect(() => {
     refreshGeometry();
-  }, [alignmentSquare, anchorDistance, parsedPrimitives, refreshGeometry]);
+  }, [refreshGeometry]);
 
   useEffect(() => {
     let active = true;

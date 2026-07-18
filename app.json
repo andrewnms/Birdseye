@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Birdseye",
-    "slug": "Birdseye",
+    "slug": "birdseye",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -9,7 +9,7 @@
     "ios": {
       "supportsTablet": true,
       "bitcode": false,
-      "bundleIdentifier": "com.anonymous.Birdseye"
+      "bundleIdentifier": "com.anonymous.birdseye"
     },
     "android": {
       "adaptiveIcon": {
@@ -29,7 +29,7 @@
         "android.permission.WAKE_LOCK",
         "android.permission.BLUETOOTH"
       ],
-      "package": "com.anonymous.Birdseye"
+      "package": "com.anonymous.birdseye"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -42,7 +42,6 @@
           "microphonePermission": "Birdseye uses the microphone for hands-free voice guidance."
         }
       ],
-      "@config-plugins/react-native-webrtc",
       "expo-asset"
     ]
   }

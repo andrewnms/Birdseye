@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 
 import {
   createCachedCraneDemo,
@@ -11,19 +11,14 @@ export type CachedCraneDemoState = CachedCraneDemoSnapshot & {
 };
 
 export function useCachedCraneDemo(): CachedCraneDemoState {
-  const demoRef = useRef<CachedCraneDemo | null>(null);
-
-  if (demoRef.current === null) {
-    demoRef.current = createCachedCraneDemo();
-  }
-
+  const [demo] = useState<CachedCraneDemo>(() => createCachedCraneDemo());
   const [snapshot, setSnapshot] = useState<CachedCraneDemoSnapshot>(() =>
-    demoRef.current!.snapshot(),
+    demo.snapshot(),
   );
 
   const advance = useCallback(() => {
-    setSnapshot(demoRef.current!.advance());
-  }, []);
+    setSnapshot(demo.advance());
+  }, [demo]);
 
   return { ...snapshot, advance };
 }

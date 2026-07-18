@@ -4,13 +4,12 @@ import {
   registerGlobals,
 } from "react-native-webrtc";
 
-import type { NormalizedPoint, OverlayPrimitive } from "../../lesson/lib/plan";
+import type { OverlayPrimitive } from "../../lesson/lib/plan";
+import { normalizeRealtimeOverlay } from "../../overlay-tool";
 import { createRealtimeCall } from "../api-client/create-realtime-call";
 import { getRealtimeClientSecret } from "../api-client/get-realtime-client-secret";
 
 type Fetcher = (input: string, init: RequestInit) => Promise<Response>;
-
-type OverlayPoint = NormalizedPoint;
 
 export type RealtimeOverlayPrimitive = OverlayPrimitive;
 
@@ -72,8 +71,6 @@ export type RealtimeSession = {
   close(): void;
 };
 
-const directionalPrimitiveTypes = new Set(["arrow", "crease_line", "fold_curve"]);
-
 const renderOverlayTool = {
   type: "function",
   name: "render_overlay",
@@ -125,64 +122,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isNormalizedPoint(value: unknown): value is OverlayPoint {
-  return (
-    Array.isArray(value) &&
-    value.length === 2 &&
-    value.every(
-      (coordinate) =>
-        typeof coordinate === "number" &&
-        Number.isFinite(coordinate) &&
-        coordinate >= 0 &&
-        coordinate <= 1,
-    )
-  );
-}
-
-function parseOverlayPrimitive(value: unknown): RealtimeOverlayPrimitive | null {
-  if (!isRecord(value) || typeof value.type !== "string") {
-    return null;
-  }
-
-  if (directionalPrimitiveTypes.has(value.type)) {
-    if (!isNormalizedPoint(value.from) || !isNormalizedPoint(value.to)) {
-      return null;
-    }
-
-    return {
-      type: value.type as "arrow" | "crease_line" | "fold_curve",
-      from: value.from,
-      to: value.to,
-    };
-  }
-
-  if (value.type === "dot" && isNormalizedPoint(value.at)) {
-    return { type: "dot", at: value.at };
-  }
-
-  if (
-    value.type === "label" &&
-    isNormalizedPoint(value.at) &&
-    typeof value.text === "string" &&
-    value.text.trim() !== ""
-  ) {
-    return { type: "label", at: value.at, text: value.text.trim() };
-  }
-
-  return null;
-}
-
-function parseOverlay(value: unknown): RealtimeOverlayPrimitive[] {
-  if (!isRecord(value) || !Array.isArray(value.overlay)) {
-    return [];
-  }
-
-  return value.overlay.flatMap((candidate) => {
-    const primitive = parseOverlayPrimitive(candidate);
-    return primitive ? [primitive] : [];
-  });
-}
-
 function parseRealtimeEvent(value: unknown): RealtimeEvent | null {
   if (typeof value !== "string") {
     return null;
@@ -201,10 +140,13 @@ type FunctionCall = {
   argumentsJson: string;
 };
 
-function extractRenderOverlayCall(event: RealtimeEvent): FunctionCall | null {
+function extractFunctionCall(
+  event: RealtimeEvent,
+  toolName: "render_overlay" | "advance_lesson_step",
+): FunctionCall | null {
   if (
     event.type === "response.function_call_arguments.done" &&
-    event.name === "render_overlay" &&
+    event.name === toolName &&
     typeof event.call_id === "string" &&
     typeof event.arguments === "string"
   ) {
@@ -215,7 +157,7 @@ function extractRenderOverlayCall(event: RealtimeEvent): FunctionCall | null {
     event.type === "response.output_item.done" &&
     isRecord(event.item) &&
     event.item.type === "function_call" &&
-    event.item.name === "render_overlay" &&
+    event.item.name === toolName &&
     typeof event.item.call_id === "string" &&
     typeof event.item.arguments === "string"
   ) {
@@ -223,38 +165,6 @@ function extractRenderOverlayCall(event: RealtimeEvent): FunctionCall | null {
   }
 
   return null;
-}
-
-function extractAdvanceLessonCall(event: RealtimeEvent): FunctionCall | null {
-  if (
-    event.type === "response.function_call_arguments.done" &&
-    event.name === "advance_lesson_step" &&
-    typeof event.call_id === "string" &&
-    typeof event.arguments === "string"
-  ) {
-    return { callId: event.call_id, argumentsJson: event.arguments };
-  }
-
-  if (
-    event.type === "response.output_item.done" &&
-    isRecord(event.item) &&
-    event.item.type === "function_call" &&
-    event.item.name === "advance_lesson_step" &&
-    typeof event.item.call_id === "string" &&
-    typeof event.item.arguments === "string"
-  ) {
-    return { callId: event.item.call_id, argumentsJson: event.item.arguments };
-  }
-
-  return null;
-}
-
-function parseFunctionArguments(argumentsJson: string): unknown {
-  try {
-    return JSON.parse(argumentsJson);
-  } catch {
-    return null;
-  }
 }
 
 function toUserTextEvent(text: string): RealtimeEvent {
@@ -377,8 +287,8 @@ export async function createRealtimeSession({
       }
 
       onEvent?.(event);
-      const renderOverlayCall = extractRenderOverlayCall(event);
-      const advanceLessonCall = extractAdvanceLessonCall(event);
+      const renderOverlayCall = extractFunctionCall(event, "render_overlay");
+      const advanceLessonCall = extractFunctionCall(event, "advance_lesson_step");
 
       if (!renderOverlayCall && !advanceLessonCall) {
         return;
@@ -408,7 +318,7 @@ export async function createRealtimeSession({
         return;
       }
 
-      const overlay = parseOverlay(parseFunctionArguments(functionCall.argumentsJson));
+      const overlay = normalizeRealtimeOverlay(functionCall.argumentsJson);
 
       if (overlay.length > 0) {
         onOverlay(overlay);

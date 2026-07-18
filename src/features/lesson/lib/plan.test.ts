@@ -39,4 +39,34 @@ describe("validateLessonPlan", () => {
       },
     });
   });
+
+  it("preserves an optional local wireframe candidate without making it required", () => {
+    const result = validateLessonPlan({
+      goal: "identify a pcb footprint",
+      model: {
+        vertices: [
+          [0, 0, 0],
+          [1, 0, 0],
+          [0, 1, 0],
+        ],
+        faces: [[0, 1, 2]],
+      },
+      steps: [
+        {
+          n: 1,
+          say: "Set the board inside the square.",
+          overlay: [{ type: "dot", at: [0.5, 0.5] }],
+        },
+      ],
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        value: expect.objectContaining({
+          model: expect.objectContaining({ vertices: expect.any(Array) }),
+        }),
+      }),
+    );
+  });
 });

@@ -7,6 +7,7 @@ describe("planner", () => {
         JSON.stringify({
           output_text: JSON.stringify({
             goal: "assemble a simple pcb",
+            model: null,
             steps: [
               {
                 n: 1,
@@ -38,6 +39,17 @@ describe("planner", () => {
         method: "POST",
         headers: expect.objectContaining({ Authorization: "Bearer test-key" }),
       }),
+    );
+
+    const request = fetcher.mock.calls[0]?.[1];
+    const body = request?.body;
+    const payload = typeof body === "string" ? JSON.parse(body) : null;
+
+    expect(payload?.text.format.schema.properties.model).toEqual(
+      expect.objectContaining({ anyOf: expect.any(Array) }),
+    );
+    expect(payload?.text.format.schema.properties.steps.items.properties.overlay.items).toEqual(
+      expect.objectContaining({ anyOf: expect.any(Array) }),
     );
   });
 });

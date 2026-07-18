@@ -25,6 +25,11 @@ export type LessonStep = {
 export type LessonPlan = {
   goal: string;
   steps: LessonStep[];
+  /**
+   * Optional planner-provided local shape. The renderer validates it again
+   * before it reaches the live GL scene, so a lesson still runs without one.
+   */
+  model?: unknown;
 };
 
 export type PlanValidationResult =
@@ -135,11 +140,14 @@ export function validateLessonPlan(value: unknown): PlanValidationResult {
     });
   }
 
-  return {
-    ok: true,
-    value: {
-      goal: value.goal.trim(),
-      steps,
-    },
+  const plan: LessonPlan = {
+    goal: value.goal.trim(),
+    steps,
   };
+
+  if ("model" in value && value.model !== null && value.model !== undefined) {
+    plan.model = value.model;
+  }
+
+  return { ok: true, value: plan };
 }
