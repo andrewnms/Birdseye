@@ -6,6 +6,7 @@ export type ServerConfig = {
   model: string;
   plannerModel: string;
   port: number;
+  visionModel: string;
   voice: string;
 };
 
@@ -28,6 +29,7 @@ export function readServerConfig(environment: Environment): ServerConfig {
     model: environment.OPENAI_REALTIME_MODEL?.trim() || "gpt-realtime-2.1",
     plannerModel: environment.OPENAI_PLANNER_MODEL?.trim() || "gpt-5.6",
     port: parsedPort,
+    visionModel: environment.OPENAI_VISION_MODEL?.trim() || "gpt-5.6",
     voice: environment.OPENAI_REALTIME_VOICE?.trim() || "marin",
   };
 }

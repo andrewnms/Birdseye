@@ -15,6 +15,7 @@ export type {
   ScreenPoint,
   ViewportSize,
 } from "./lib/alignment";
+export type { SpatialOverlayAnchorMode } from "./lib/anchor-mode";
 export {
   parseSpatialOverlayPrimitives,
 } from "./lib/overlay-primitives";

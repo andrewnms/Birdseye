@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react-nativ
 import type { LessonPlan } from "../lib/plan";
 import { GuidedLesson } from "./GuidedLesson";
 
+const mockCaptureFrame = jest.fn();
+
 jest.mock("react-native-webrtc", () => ({
   mediaDevices: {},
   RTCPeerConnection: jest.fn(),
@@ -18,10 +20,17 @@ jest.mock("../../camera/components/CameraStage", () => {
   const React = require("react");
   const { View } = require("react-native");
 
-  return {
-    CameraStage: ({ children }: { children: React.ReactNode }) =>
-      React.createElement(View, { testID: "camera-stage" }, children),
-  };
+  const CameraStage = React.forwardRef(
+      ({ children }: { children: React.ReactNode }, ref: unknown) => {
+        React.useImperativeHandle(ref, () => ({
+          captureFrame: mockCaptureFrame,
+        }));
+        return React.createElement(View, { testID: "camera-stage" }, children);
+      },
+    );
+  CameraStage.displayName = "MockCameraStage";
+
+  return { CameraStage };
 });
 
 jest.mock("../../spatial/components/SpatialOverlay", () => {
@@ -29,9 +38,15 @@ jest.mock("../../spatial/components/SpatialOverlay", () => {
   const { View } = require("react-native");
 
   return {
-    SpatialOverlay: ({ primitives }: { primitives: unknown[] }) =>
+    SpatialOverlay: ({
+      primitives,
+      anchorMode = "world",
+    }: {
+      primitives: unknown[];
+      anchorMode?: string;
+    }) =>
       React.createElement(View, {
-        accessibilityLabel: `Overlay with ${primitives.length} primitives`,
+        accessibilityLabel: `Overlay ${anchorMode} with ${primitives.length} primitives`,
       }),
   };
 });
@@ -53,6 +68,11 @@ const plan: LessonPlan = {
 };
 
 describe("GuidedLesson", () => {
+  beforeEach(() => {
+    mockCaptureFrame.mockReset();
+    mockCaptureFrame.mockResolvedValue(null);
+  });
+
   it("keeps the current step, spoken instruction, and rendered overlay in lockstep", async () => {
     const narrate = jest.fn();
 
@@ -60,7 +80,7 @@ describe("GuidedLesson", () => {
 
     expect(screen.getByText("Step 1 of 2")).toBeTruthy();
     expect(screen.getByText("Place the bare board in the square.")).toBeTruthy();
-    expect(screen.getByLabelText("Overlay with 1 primitives")).toBeTruthy();
+    expect(screen.getByLabelText("Overlay world with 1 primitives")).toBeTruthy();
 
     await fireEvent.press(screen.getByRole("button", { name: "Next step" }));
 
@@ -99,6 +119,42 @@ describe("GuidedLesson", () => {
       expect(narrate).toHaveBeenCalledWith("Place the bare board in the square.");
     });
 
-    expect(screen.getByLabelText("Overlay with 1 primitives")).toBeTruthy();
+    expect(screen.getByLabelText("Overlay world with 1 primitives")).toBeTruthy();
+  });
+
+  it("replaces the static guidance with a screen-locked annotation from the current camera frame", async () => {
+    const analyzeFrame = jest.fn().mockResolvedValue({
+      observation: "the paper point is visible at the center.",
+      overlay: [{ type: "label", at: [0.5, 0.5], text: "fold this point" }],
+    });
+    mockCaptureFrame.mockResolvedValue({
+      base64: "frame-data",
+      width: 640,
+      height: 480,
+    });
+
+    await render(
+      <GuidedLesson
+        plan={plan}
+        tokenServerUrl="http://192.168.1.20:3000"
+        createSession={jest
+          .fn()
+          .mockRejectedValue(new Error("live voice requires a birdseye development build"))}
+        analyzeFrame={analyzeFrame}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(analyzeFrame).toHaveBeenCalledWith(
+        {
+          goal: "assemble a simple pcb",
+          step: { n: 1, say: "Place the bare board in the square." },
+          imageDataUrl: "data:image/jpeg;base64,frame-data",
+        },
+        expect.objectContaining({ baseUrl: "http://192.168.1.20:3000" }),
+      );
+      expect(screen.getByLabelText("Overlay screen with 1 primitives")).toBeTruthy();
+      expect(screen.getByText("the paper point is visible at the center.")).toBeTruthy();
+    });
   });
 });

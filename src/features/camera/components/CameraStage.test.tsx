@@ -5,16 +5,27 @@ import {
   useMicrophonePermissions,
 } from "expo-camera";
 import { AppState, Linking, Text } from "react-native";
+import { createRef } from "react";
 
-import { CameraStage } from "./CameraStage";
+import { CameraStage, type CameraStageRef } from "./CameraStage";
+
+const mockTakePictureAsync = jest.fn();
 
 jest.mock("expo-camera", () => {
   const React = require("react");
   const { View } = require("react-native");
+  const CameraView = React.forwardRef(
+    (props: Record<string, unknown>, ref: unknown) => {
+      React.useImperativeHandle(ref, () => ({
+        takePictureAsync: mockTakePictureAsync,
+      }));
+      return React.createElement(View, props);
+    },
+  );
+  CameraView.displayName = "MockCameraView";
 
   return {
-    CameraView: (props: Record<string, unknown>) =>
-      React.createElement(View, props),
+    CameraView,
     useCameraPermissions: jest.fn(),
     useMicrophonePermissions: jest.fn(),
   };
@@ -49,6 +60,90 @@ describe("CameraStage", () => {
 
     expect(getByText("Checking camera access…")).toBeTruthy();
     expect(queryByTestId("live-camera-preview")).toBeNull();
+  });
+
+  it("does not capture a frame until the camera stage has granted access", async () => {
+    const deniedPermission: PermissionResponse = {
+      granted: false,
+      canAskAgain: true,
+      expires: "never",
+      status: PermissionStatus.DENIED,
+    };
+    const stageRef = createRef<CameraStageRef>();
+    cameraPermissions.mockReturnValue([
+      deniedPermission,
+      requestCamera,
+      refreshCamera,
+    ]);
+    microphonePermissions.mockReturnValue([
+      deniedPermission,
+      requestMicrophone,
+      refreshMicrophone,
+    ]);
+
+    await render(<CameraStage ref={stageRef} />);
+
+    expect(stageRef.current).not.toBeNull();
+    await expect(stageRef.current?.captureFrame()).resolves.toBeNull();
+  });
+
+  it("does not invoke the native camera before its granted preview is ready", async () => {
+    const granted: PermissionResponse = {
+      granted: true,
+      canAskAgain: true,
+      expires: "never",
+      status: PermissionStatus.GRANTED,
+    };
+    const stageRef = createRef<CameraStageRef>();
+    cameraPermissions.mockReturnValue([granted, requestCamera, refreshCamera]);
+    microphonePermissions.mockReturnValue([
+      granted,
+      requestMicrophone,
+      refreshMicrophone,
+    ]);
+
+    await render(<CameraStage ref={stageRef} />);
+
+    await expect(stageRef.current?.captureFrame()).resolves.toBeNull();
+    expect(mockTakePictureAsync).not.toHaveBeenCalled();
+  });
+
+  it("returns a compressed base64 JPEG frame after the granted preview is ready", async () => {
+    const granted: PermissionResponse = {
+      granted: true,
+      canAskAgain: true,
+      expires: "never",
+      status: PermissionStatus.GRANTED,
+    };
+    const stageRef = createRef<CameraStageRef>();
+    mockTakePictureAsync.mockResolvedValue({
+      base64: "compressed-jpeg-data",
+      format: "jpg",
+      height: 480,
+      uri: "file:///frame.jpg",
+      width: 640,
+    });
+    cameraPermissions.mockReturnValue([granted, requestCamera, refreshCamera]);
+    microphonePermissions.mockReturnValue([
+      granted,
+      requestMicrophone,
+      refreshMicrophone,
+    ]);
+
+    const { getByTestId } = await render(<CameraStage ref={stageRef} />);
+    await act(async () => {
+      fireEvent(getByTestId("live-camera-preview"), "onCameraReady");
+    });
+
+    await expect(stageRef.current?.captureFrame()).resolves.toEqual({
+      base64: "compressed-jpeg-data",
+      height: 480,
+      width: 640,
+    });
+    expect(mockTakePictureAsync).toHaveBeenCalledWith({
+      base64: true,
+      quality: 0.25,
+    });
   });
 
   it("requests both permissions when access can be requested again", async () => {

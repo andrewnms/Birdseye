@@ -2,7 +2,10 @@ import * as Speech from "expo-speech";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { CameraStage } from "../../camera/components/CameraStage";
+import {
+  CameraStage,
+  type CameraStageRef,
+} from "../../camera/components/CameraStage";
 import { parseWireframeModel } from "../../model-preview";
 import {
   createRealtimeSession,
@@ -11,12 +14,18 @@ import {
 } from "../../realtime/session/create-realtime-session";
 import { SpatialOverlay } from "../../spatial/client";
 import type { SpatialOverlayPrimitive } from "../../spatial";
+import {
+  analyzeCameraFrame,
+  type CameraFrameAnalysis,
+} from "../../vision/client";
 import type { LessonPlan } from "../lib/plan";
 import { advanceLesson, startLesson, type LessonSession } from "../lib/session";
 
 type RealtimeSessionFactory = (
   options: CreateRealtimeSessionOptions,
 ) => Promise<RealtimeSession>;
+
+type CameraFrameAnalyzer = typeof analyzeCameraFrame;
 
 export type GuidedLessonProps = {
   plan: LessonPlan;
@@ -25,9 +34,18 @@ export type GuidedLessonProps = {
   /** Injectable for deterministic tests and platform-specific narration. */
   narrate?(message: string): void;
   createSession?: RealtimeSessionFactory;
+  /** Samples the active CameraView through the private vision endpoint. */
+  analyzeFrame?: CameraFrameAnalyzer;
+  /** A conservative default keeps mobile heat and API use bounded. */
+  visionPollIntervalMs?: number;
 };
 
 type VoiceMode = "connecting" | "realtime" | "fallback";
+
+type VisionAnalysisSnapshot = {
+  analysis: CameraFrameAnalysis;
+  stepIndex: number;
+};
 
 function createStepPrompt(plan: LessonPlan, stepIndex: number): string {
   const step = plan.steps[stepIndex];
@@ -61,6 +79,8 @@ function GuidedLessonRun({
   onExit,
   narrate = defaultNarrate,
   createSession = createRealtimeSession,
+  analyzeFrame = analyzeCameraFrame,
+  visionPollIntervalMs = 2_500,
 }: GuidedLessonProps) {
   const [lesson, setLesson] = useState<LessonSession>(() => startLesson(plan));
   const [toolOverlay, setToolOverlay] = useState<SpatialOverlayPrimitive[] | null>(
@@ -70,8 +90,12 @@ function GuidedLessonRun({
     tokenServerUrl ? "connecting" : "fallback",
   );
   const [connectionRevision, setConnectionRevision] = useState(0);
+  const [visionAnalysis, setVisionAnalysis] =
+    useState<VisionAnalysisSnapshot | null>(null);
+  const cameraRef = useRef<CameraStageRef | null>(null);
   const realtimeSessionRef = useRef<RealtimeSession | null>(null);
   const pendingTapAdvanceRef = useRef(false);
+  const visionRequestInFlightRef = useRef(false);
 
   const advance = useCallback((fromVoice = false) => {
     if (fromVoice && pendingTapAdvanceRef.current) {
@@ -149,6 +173,61 @@ function GuidedLessonRun({
     [],
   );
 
+  useEffect(() => {
+    if (!tokenServerUrl || lesson.status === "complete") {
+      return undefined;
+    }
+
+    let active = true;
+    const controller = new AbortController();
+    const intervalMs = Math.max(1_500, visionPollIntervalMs);
+
+    const analyzeCurrentFrame = async () => {
+      if (visionRequestInFlightRef.current) {
+        return;
+      }
+
+      visionRequestInFlightRef.current = true;
+
+      try {
+        const frame = await cameraRef.current?.captureFrame();
+
+        if (!frame || !active) {
+          return;
+        }
+
+        const analysis = await analyzeFrame(
+          {
+            goal: lesson.plan.goal,
+            step: {
+              n: lesson.currentStep.n,
+              say: lesson.currentStep.say,
+            },
+            imageDataUrl: `data:image/jpeg;base64,${frame.base64}`,
+          },
+          { baseUrl: tokenServerUrl, signal: controller.signal },
+        );
+
+        if (active) {
+          setVisionAnalysis({ analysis, stepIndex: lesson.stepIndex });
+        }
+      } catch {
+        // The static step overlay remains useful if a frame is unavailable.
+      } finally {
+        visionRequestInFlightRef.current = false;
+      }
+    };
+
+    void analyzeCurrentFrame();
+    const interval = setInterval(() => void analyzeCurrentFrame(), intervalMs);
+
+    return () => {
+      active = false;
+      controller.abort();
+      clearInterval(interval);
+    };
+  }, [analyzeFrame, lesson, tokenServerUrl, visionPollIntervalMs]);
+
   const handleNext = useCallback(() => {
     pendingTapAdvanceRef.current = true;
     try {
@@ -182,11 +261,22 @@ function GuidedLessonRun({
     );
   }
 
-  const displayedOverlay = toolOverlay ?? lesson.currentStep.overlay;
+  const currentVisionAnalysis =
+    visionAnalysis?.stepIndex === lesson.stepIndex
+      ? visionAnalysis.analysis
+      : null;
+  const hasVisionOverlay = Boolean(currentVisionAnalysis?.overlay.length);
+  const displayedOverlay = hasVisionOverlay
+    ? currentVisionAnalysis?.overlay ?? []
+    : toolOverlay ?? lesson.currentStep.overlay;
 
   return (
-    <CameraStage>
-      <SpatialOverlay primitives={displayedOverlay} wireframe={wireframe} />
+    <CameraStage ref={cameraRef}>
+      <SpatialOverlay
+        anchorMode={hasVisionOverlay ? "screen" : "world"}
+        primitives={displayedOverlay}
+        wireframe={wireframe}
+      />
       <View pointerEvents="box-none" style={styles.chrome}>
         <View style={styles.topBar}>
           <View style={styles.goalPill}>
@@ -215,6 +305,11 @@ function GuidedLessonRun({
             </Text>
           </View>
           <Text style={styles.narration}>{lesson.currentStep.say}</Text>
+          {currentVisionAnalysis ? (
+            <Text accessibilityLabel="Camera observation" style={styles.observation}>
+              {currentVisionAnalysis.observation}
+            </Text>
+          ) : null}
           <Pressable
             accessibilityLabel="Next step"
             accessibilityRole="button"
@@ -309,6 +404,11 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "700",
     lineHeight: 28,
+  },
+  observation: {
+    color: "#a4f4d1",
+    fontSize: 14,
+    lineHeight: 20,
   },
   nextButton: {
     alignItems: "center",

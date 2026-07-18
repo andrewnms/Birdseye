@@ -3,12 +3,18 @@ import express from "express";
 
 import type { LessonPlan } from "../../src/features/lesson/lib/plan";
 import type { RealtimeClientSecretMinter } from "./realtime-client-secret";
+import {
+  parseVisionAnalysisRequest,
+  parseVisionObservation,
+  type VisionAnalyzer,
+} from "./vision";
 
 type ServerOptions = {
   clientSecretMinter: RealtimeClientSecretMinter;
   planner: {
     create(goal: string): Promise<LessonPlan>;
   };
+  visionAnalyzer: VisionAnalyzer;
 };
 
 const clientSecretLimit = 12;
@@ -67,12 +73,16 @@ function hasGoal(value: unknown): value is { goal: string } {
   );
 }
 
-export function createServerApp({ clientSecretMinter, planner }: ServerOptions) {
+export function createServerApp({
+  clientSecretMinter,
+  planner,
+  visionAnalyzer,
+}: ServerOptions) {
   const app = express();
   const clientSecretAttempts = new Map<string, { count: number; expiresAt: number }>();
 
   app.disable("x-powered-by");
-  app.use(express.json({ limit: "16kb" }));
+  app.use(express.json({ limit: "800kb" }));
   app.use(
     cors({
       origin(origin, callback) {
@@ -98,6 +108,31 @@ export function createServerApp({ clientSecretMinter, planner }: ServerOptions) 
         error instanceof Error ? error.message : "unknown server error",
       );
       response.status(502).json({ error: "Unable to create a lesson right now." });
+    }
+  });
+  app.post("/vision/analyze", async (request, response) => {
+    const analysisRequest = parseVisionAnalysisRequest(request.body);
+
+    if (!analysisRequest) {
+      response
+        .status(400)
+        .json({ error: "A valid JPEG or PNG camera frame under 768 KB is required." });
+      return;
+    }
+
+    try {
+      const observation = parseVisionObservation(
+        await visionAnalyzer.analyze(analysisRequest),
+      );
+
+      if (!observation) {
+        throw new Error("the vision analyzer returned invalid observation data");
+      }
+
+      response.set("Cache-Control", "no-store");
+      response.json(observation);
+    } catch {
+      response.status(502).json({ error: "Unable to analyze the camera frame right now." });
     }
   });
   app.post("/realtime/client-secret", async (request, response) => {

@@ -14,6 +14,7 @@ describe("server configuration", () => {
         OPENAI_REALTIME_MODEL: "gpt-realtime-test",
         OPENAI_REALTIME_VOICE: "cedar",
         OPENAI_PLANNER_MODEL: "gpt-5.6-test",
+        OPENAI_VISION_MODEL: "gpt-5.6-vision-test",
         PORT: "4010",
       }),
     ).toEqual({
@@ -21,6 +22,7 @@ describe("server configuration", () => {
       host: "0.0.0.0",
       model: "gpt-realtime-test",
       plannerModel: "gpt-5.6-test",
+      visionModel: "gpt-5.6-vision-test",
       port: 4010,
       voice: "cedar",
     });

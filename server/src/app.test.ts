@@ -5,6 +5,7 @@ import type { Express } from "express";
 import { createServerApp } from "./app";
 import type { LessonPlan } from "../../src/features/lesson/lib/plan";
 import type { RealtimeClientSecretMinter } from "./realtime-client-secret";
+import type { VisionAnalyzer } from "./vision";
 
 type Planner = {
   create(goal: string): Promise<LessonPlan>;
@@ -25,8 +26,9 @@ type AppRequest = {
 function createTestApp(
   clientSecretMinter: RealtimeClientSecretMinter = { mint: jest.fn() },
   planner: Planner = { create: jest.fn() },
+  visionAnalyzer: VisionAnalyzer = { analyze: jest.fn() },
 ): Express {
-  return createServerApp({ clientSecretMinter, planner });
+  return createServerApp({ clientSecretMinter, planner, visionAnalyzer });
 }
 
 async function requestApp(app: Express, path: string, init?: AppRequest): Promise<AppResponse> {
@@ -173,5 +175,140 @@ describe("local server", () => {
     expect(response.status).toBe(200);
     expect(JSON.parse(response.body)).toMatchObject({ goal: "assemble a pcb" });
     expect(planner.create).toHaveBeenCalledWith("assemble a pcb");
+  });
+
+  it("turns one bounded camera frame into generic visual guidance", async () => {
+    const analyze = jest.fn().mockResolvedValue({
+      observation: "The connector is aligned with the board pads.",
+      overlay: [{ type: "dot", at: [0.5, 0.5] }],
+    });
+    const response = await requestApp(
+      createTestApp({ mint: jest.fn() }, { create: jest.fn() }, { analyze }),
+      "/vision/analyze",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          goal: "solder a pcb connector",
+          step: { n: 3, say: "Align the connector with the pads." },
+          imageDataUrl: "data:image/jpeg;base64,aGVsbG8=",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({
+      observation: "The connector is aligned with the board pads.",
+      overlay: [{ type: "dot", at: [0.5, 0.5] }],
+    });
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(analyze).toHaveBeenCalledWith({
+      goal: "solder a pcb connector",
+      step: { n: 3, say: "Align the connector with the pads." },
+      imageDataUrl: "data:image/jpeg;base64,aGVsbG8=",
+    });
+  });
+
+  it("rejects a non-JPEG or PNG frame before it reaches the vision model", async () => {
+    const analyze = jest.fn();
+    const response = await requestApp(
+      createTestApp({ mint: jest.fn() }, { create: jest.fn() }, { analyze }),
+      "/vision/analyze",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          goal: "prepare a cutting board",
+          step: { n: 1, say: "Place the board on a stable surface." },
+          imageDataUrl: "data:image/gif;base64,R0lGODlh",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(JSON.parse(response.body)).toEqual({
+      error: "A valid JPEG or PNG camera frame under 768 KB is required.",
+    });
+    expect(analyze).not.toHaveBeenCalled();
+  });
+
+  it("accepts a bounded frame larger than normal lesson payloads", async () => {
+    const analyze = jest.fn().mockResolvedValue({
+      observation: "The board is centered in the work area.",
+      overlay: [],
+    });
+    const imageDataUrl = `data:image/png;base64,${"A".repeat(20 * 1024)}`;
+    const response = await requestApp(
+      createTestApp({ mint: jest.fn() }, { create: jest.fn() }, { analyze }),
+      "/vision/analyze",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          goal: "prepare a cutting board",
+          step: { n: 1, say: "Place the board on a stable surface." },
+          imageDataUrl,
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(analyze).toHaveBeenCalledWith(
+      expect.objectContaining({ imageDataUrl }),
+    );
+  });
+
+  it("rejects a frame at or above the 768 KB data-url cap before analysis", async () => {
+    const analyze = jest.fn();
+    const imageDataUrl = `data:image/png;base64,${"A".repeat(196_608 * 4)}`;
+    const response = await requestApp(
+      createTestApp({ mint: jest.fn() }, { create: jest.fn() }, { analyze }),
+      "/vision/analyze",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          goal: "prepare a cutting board",
+          step: { n: 1, say: "Place the board on a stable surface." },
+          imageDataUrl,
+        }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(JSON.parse(response.body)).toEqual({
+      error: "A valid JPEG or PNG camera frame under 768 KB is required.",
+    });
+    expect(analyze).not.toHaveBeenCalled();
+  });
+
+  it("does not return an invalid observation when an analyzer adapter misbehaves", async () => {
+    const response = await requestApp(
+      createTestApp(
+        { mint: jest.fn() },
+        { create: jest.fn() },
+        {
+          analyze: jest.fn().mockResolvedValue({
+            observation: "The pot handle is visible.",
+            overlay: [{ type: "dot", at: [1.2, 0.5] }],
+          }),
+        },
+      ),
+      "/vision/analyze",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          goal: "saute vegetables",
+          step: { n: 2, say: "Keep the pot handle pointed inward." },
+          imageDataUrl: "data:image/jpeg;base64,aGVsbG8=",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(502);
+    expect(JSON.parse(response.body)).toEqual({
+      error: "Unable to analyze the camera frame right now.",
+    });
   });
 });

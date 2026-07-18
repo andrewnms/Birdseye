@@ -41,11 +41,16 @@ import {
   type ViewportSize,
 } from "../lib/alignment";
 import {
+  resolveLabelScreenPoint,
+  type SpatialOverlayAnchorMode,
+} from "../lib/anchor-mode";
+import {
   createWorldLockedCameraOrientation,
   type DeviceRotation,
   type WorldLockedCameraOrientation,
 } from "../lib/device-orientation";
 import {
+  type NormalizedPoint,
   parseSpatialOverlayPrimitives,
   type SpatialOverlayPrimitive,
 } from "../lib/overlay-primitives";
@@ -60,11 +65,13 @@ type SceneInputs = {
   wireframe: WireframeGeometry | null;
   alignmentSquare?: AlignmentSquare;
   anchorDistance: number;
+  anchorMode: SpatialOverlayAnchorMode;
 };
 
 type WorldLabel = {
   key: string;
   text: string;
+  point: NormalizedPoint;
   position: Vector3;
 };
 
@@ -82,6 +89,8 @@ type OverlaySceneState = {
   overlayGroup: Group;
   labels: WorldLabel[];
   viewport: ViewportSize;
+  alignmentSquare: AlignmentSquare;
+  anchorMode: SpatialOverlayAnchorMode;
 };
 
 type DisposableObject = {
@@ -92,6 +101,8 @@ type DisposableObject = {
 export type SpatialOverlayProps = {
   /** Untrusted tool-call payloads are accepted and invalid primitives are ignored. */
   primitives?: readonly unknown[];
+  /** `world` uses DeviceMotion, while `screen` stays fixed to camera pixels. */
+  anchorMode?: SpatialOverlayAnchorMode;
   /** Optional validated local shape from the planner, rendered as transparent lines. */
   wireframe?: WireframeGeometry | null;
   /** Local coordinates of the visible square the learner aligns their work to. */
@@ -123,6 +134,25 @@ function disposeOverlayGroup(group: Group): void {
   });
 
   group.clear();
+}
+
+function applyAnchorMode(
+  state: OverlaySceneState,
+  anchorMode: SpatialOverlayAnchorMode,
+): void {
+  if (state.anchorMode === anchorMode) {
+    return;
+  }
+
+  state.overlayGroup.removeFromParent();
+
+  if (anchorMode === "screen") {
+    state.camera.add(state.overlayGroup);
+  } else {
+    state.scene.add(state.overlayGroup);
+  }
+
+  state.anchorMode = anchorMode;
 }
 
 function createLine(
@@ -218,6 +248,8 @@ function buildOverlayGeometry(state: OverlaySceneState, inputs: SceneInputs): vo
 
   const square =
     inputs.alignmentSquare ?? createCenteredAlignmentSquare(state.viewport);
+  state.alignmentSquare = square;
+  applyAnchorMode(state, inputs.anchorMode);
   const distance = normalizedAnchorDistance(inputs.anchorDistance);
   const toWorld = (point: readonly [number, number]) =>
     normalizedPointToWorldPoint(
@@ -267,6 +299,7 @@ function buildOverlayGeometry(state: OverlaySceneState, inputs: SceneInputs): vo
       state.labels.push({
         key: `label-${index}`,
         text: primitive.text,
+        point: primitive.at,
         position: toWorld(primitive.at),
       });
     }
@@ -275,11 +308,13 @@ function buildOverlayGeometry(state: OverlaySceneState, inputs: SceneInputs): vo
 
 function projectLabels(state: OverlaySceneState): ProjectedLabel[] {
   return state.labels.flatMap((label) => {
-    const screenPoint = worldPointToScreenPoint(
-      label.position,
-      state.camera,
-      state.viewport,
-    );
+    const screenPoint = resolveLabelScreenPoint({
+      anchorMode: state.anchorMode,
+      point: label.point,
+      square: state.alignmentSquare,
+      projectWorldPoint: () =>
+        worldPointToScreenPoint(label.position, state.camera, state.viewport),
+    });
 
     return screenPoint
       ? [
@@ -301,18 +336,21 @@ function updateViewport(state: OverlaySceneState, viewport: ViewportSize): void 
 
 function disposeScene(state: OverlaySceneState): void {
   disposeOverlayGroup(state.overlayGroup);
-  state.scene.remove(state.overlayGroup);
+  state.overlayGroup.removeFromParent();
 }
 
 /**
- * Transparent world-locked annotation layer for a live CameraView.
+ * Transparent annotation layer for a live CameraView.
  *
- * Geometry sits on an initial world plane, while DeviceMotion updates only the
- * Three camera. Native text is projected from that same world plane into a
- * React Native label layer because GLView cannot render device fonts directly.
+ * `world` geometry sits on an initial world plane while DeviceMotion updates
+ * only the Three camera. `screen` geometry becomes a camera child, preserving
+ * its normalized position in the live image while the phone moves. Native text
+ * uses the matching world projection or screen-coordinate label layer because
+ * GLView cannot render device fonts directly.
  */
 export function SpatialOverlay({
   primitives = [],
+  anchorMode = "world",
   wireframe = null,
   alignmentSquare,
   anchorDistance = defaultAnchorDistance,
@@ -332,10 +370,11 @@ export function SpatialOverlay({
     () => ({
       primitives: parsedPrimitives,
       wireframe,
+      anchorMode,
       alignmentSquare,
       anchorDistance: normalizedAnchorDistance(anchorDistance),
     }),
-    [alignmentSquare, anchorDistance, parsedPrimitives, wireframe],
+    [alignmentSquare, anchorDistance, anchorMode, parsedPrimitives, wireframe],
   );
 
   const refreshGeometry = useCallback(() => {
@@ -391,6 +430,8 @@ export function SpatialOverlay({
         overlayGroup,
         labels: [],
         viewport,
+        alignmentSquare: createCenteredAlignmentSquare(viewport),
+        anchorMode: "world",
       };
 
       rendererStateRef.current = state;
@@ -429,6 +470,10 @@ export function SpatialOverlay({
   }, [refreshGeometry]);
 
   useEffect(() => {
+    if (anchorMode === "screen") {
+      return;
+    }
+
     let active = true;
     let subscription: { remove(): void } | null = null;
 
@@ -477,7 +522,7 @@ export function SpatialOverlay({
       active = false;
       subscription?.remove();
     };
-  }, [applyLatestRotation, onMotionAvailabilityChange]);
+  }, [anchorMode, applyLatestRotation, onMotionAvailabilityChange]);
 
   useEffect(
     () => () => {

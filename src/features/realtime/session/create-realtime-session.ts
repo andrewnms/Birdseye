@@ -128,6 +128,7 @@ function nativeWebRtcAdapter(): RealtimeWebRtcAdapter | null {
     return null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- a static import crashes Expo Go before this native-module guard can run.
   const native = require("react-native-webrtc") as NativeWebRtcExports;
 
   return {
